@@ -1,5 +1,7 @@
 module("C-130J", package.seeall)
 
+local ActionArgument = require("Scripts.DCS-BIOS.lib.modules.documentation.ActionArgument")
+local ActionInput = require("Scripts.DCS-BIOS.lib.modules.documentation.ActionInput")
 local BIOSConfig = require("Scripts.DCS-BIOS.BIOSConfig")
 local CniDisplay = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniDisplay")
 local CommonPositions = require("Scripts.DCS-BIOS.lib.modules.CommonPositions")
@@ -2009,6 +2011,27 @@ C_130J:addExportHook(function(dev0)
 	cni_display:update(dev0)
 end)
 
+--- Adds an input turning around the position the display takes a CNI-MU toggle to start in, for
+--- an aircraft that did not start in it. Only the exported display changes, not the aircraft.
+--- @param identifier string
+--- @param seat integer
+--- @param toggle string a key of CniSessionMap.STARTING_STATES
+--- @param category string
+--- @param description string
+local function define_cni_swap(identifier, seat, toggle, category, description)
+	local control = Control:new(category, ControlType.action, identifier, description, {
+		ActionInput:new(ActionArgument.toggle, "Swaps the highlight"),
+	}, {}, nil, ControlAttributeDocumentation.from_base_attributes(nil))
+
+	C_130J:addControl(control)
+
+	C_130J:addInputProcessor(identifier, function(action)
+		if action == ActionArgument.toggle then
+			cni_display:swap_starting_state(seat, toggle)
+		end
+	end)
+end
+
 for seat, info in ipairs(CNI_DISPLAY_SEATS) do
 	for line = 1, CniDisplay.LINES do
 		C_130J:defineString(info.prefix .. "_CNI_LINE" .. line, function()
@@ -2029,6 +2052,8 @@ for seat, info in ipairs(CNI_DISPLAY_SEATS) do
 	C_130J:defineIntegerFromGetter(info.prefix .. "_CNI_EXEC_LAMP", function()
 		return cni_display:get_exec_lamp(seat) and 1 or 0
 	end, 1, info.category, info.description .. " EXEC Light (derived from the display and the EXEC keys)")
+
+	define_cni_swap(info.prefix .. "_CNI_WPT_SEQ_SWAP", seat, "WPT_SEQ", info.category, info.description .. " Display: Swap the WPT SEQ highlight (AUTO/MAN) if the aircraft did not start on AUTO")
 end
 
 return C_130J

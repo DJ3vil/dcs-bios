@@ -329,7 +329,8 @@ function TestC130JCniSession:testTwoDecisionsSharingAStemStayApart()
 		{ key = "route@10", members = { "route_cp", "route_nom", "route_pp" } },
 	})
 
-	local map = CniSessionMap:new()
+	-- without the starting state WPT SEQ is taken to be in
+	local map = CniSessionMap:new({})
 	local frames = {
 		{ "AUTO", "P-P" },
 		{ "MAN", "P-P" },
@@ -350,6 +351,71 @@ function TestC130JCniSession:testTwoDecisionsSharingAStemStayApart()
 	-- WP TRANS has been through its three positions and follows the cockpit, WPT SEQ cannot be told
 	lu.assertEquals(lit_words(map, page, route("MAN", "ROT")), { "ROT" })
 	lu.assertEquals(lit_words(map, page, route("AUTO", "CP")), { "CP" })
+end
+
+--- The lit WPT SEQ word of the route page, or nil for neither
+local function wpt_seq(map, page, seq, trans)
+	local lit = nil
+	for _, word in ipairs(lit_words(map, page, route(seq, trans or "P-P"))) do
+		if word == "AUTO" or word == "MAN" then
+			lu.assertNil(lit, "AUTO and MAN drawn lit together")
+			lit = word
+		end
+	end
+	return lit
+end
+
+function TestC130JCniSession:testWptSeqStartsOnAutoAndFollowsEverySwitch()
+	local page = CniSchema.prepare_page(ROUTE)
+	local map = CniSessionMap:new()
+
+	lu.assertEquals(wpt_seq(map, page, "AUTO"), "AUTO")
+	lu.assertEquals(wpt_seq(map, page, "MAN"), "MAN")
+	lu.assertEquals(wpt_seq(map, page, "MAN", "ROT"), "MAN")
+	lu.assertEquals(wpt_seq(map, page, "AUTO", "ROT"), "AUTO")
+	lu.assertEquals(wpt_seq(map, page, "MAN", "CP"), "MAN")
+end
+
+function TestC130JCniSession:testSwapTurnsTheStartingPositionAround()
+	local page = CniSchema.prepare_page(ROUTE)
+	local map = CniSessionMap:new()
+
+	-- this aircraft started on MAN, which the display cannot tell from AUTO
+	lu.assertEquals(wpt_seq(map, page, "MAN"), "AUTO")
+
+	map:swap("WPT_SEQ")
+	lu.assertEquals(wpt_seq(map, page, "MAN"), "MAN")
+	lu.assertEquals(wpt_seq(map, page, "AUTO"), "AUTO")
+	lu.assertEquals(wpt_seq(map, page, "MAN"), "MAN")
+
+	-- swapping again turns it back
+	map:swap("WPT_SEQ")
+	lu.assertEquals(wpt_seq(map, page, "MAN"), "AUTO")
+
+	-- a name that is no starting state changes nothing
+	map:swap("NO_SUCH_TOGGLE")
+	lu.assertEquals(wpt_seq(map, page, "MAN"), "AUTO")
+end
+
+function TestC130JCniSession:testSwapBeforeTheToggleIsSeen()
+	local page = CniSchema.prepare_page(ROUTE)
+	local map = CniSessionMap:new()
+
+	map:swap("WPT_SEQ")
+	lu.assertEquals(wpt_seq(map, page, "MAN"), "MAN")
+	lu.assertEquals(wpt_seq(map, page, "AUTO"), "AUTO")
+end
+
+function TestC130JCniSession:testRebuiltPageStartsOverFromTheStartingPosition()
+	local page = CniSchema.prepare_page(ROUTE)
+	local map = CniSessionMap:new()
+	lu.assertEquals(wpt_seq(map, page, "AUTO"), "AUTO")
+	lu.assertEquals(wpt_seq(map, page, "MAN"), "MAN")
+
+	-- the same page built anew: every element name changes, the aircraft starts over
+	local rebuilt = route("AUTO", "P-P"):gsub("{", "{NEW-")
+	local lit = lit_words(map, page, rebuilt)
+	lu.assertEquals(lit, { "AUTO" })
 end
 
 function TestC130JCniSession:testPagesKeepWhatWasLearnedApart()
@@ -416,4 +482,49 @@ function TestC130JCniSession:testDisplayLearnsPerSeat()
 
 	-- the copilot's CNI-MU draws with elements of its own, and nothing was learned about them
 	lu.assertEquals(alignment(2), "111011110111")
+end
+
+function TestC130JCniSession:testDisplaySwapsWptSeqPerSeat()
+	local indications = {}
+	local display = CniDisplay:new({
+		list_indication = function(id)
+			return indications[id] or ""
+		end,
+		get_device = function()
+			return nil
+		end,
+		load_pages = function()
+			return { ROUTE }
+		end,
+	})
+	local function run(ticks)
+		for _ = 1, ticks do
+			display:update(nil)
+		end
+	end
+	-- line 9 holds WPT SEQ: MAN in columns 17-19, AUTO in columns 22-25
+	local function wpt_seq_format(seat)
+		local format = display:get_format(seat, 9)
+		return format:sub(18, 20) .. " " .. format:sub(22, 25)
+	end
+
+	indications[8] = route("MAN", "P-P")
+	indications[9] = route("MAN", "P-P")
+	run(30)
+	lu.assertEquals(display:get_line(1, 9), "                 MAN/AUTO")
+	lu.assertEquals(wpt_seq_format(1), "111 2222")
+
+	display:swap_starting_state(1, "WPT_SEQ")
+	run(6)
+	lu.assertEquals(wpt_seq_format(1), "222 1111")
+	lu.assertEquals(wpt_seq_format(2), "111 2222")
+end
+
+function TestC130JCniSession:testModuleOffersTheSwapForEverySeat()
+	local C_130J = require("Scripts.DCS-BIOS.lib.modules.aircraft_modules.C-130J")
+	for _, prefix in ipairs({ "PLT", "CPLT", "AUG" }) do
+		local swap = C_130J.inputProcessors[prefix .. "_CNI_WPT_SEQ_SWAP"]
+		lu.assertNotNil(swap, prefix)
+		swap("TOGGLE")
+	end
 end

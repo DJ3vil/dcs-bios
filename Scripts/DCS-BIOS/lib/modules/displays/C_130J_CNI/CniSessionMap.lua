@@ -18,25 +18,46 @@ module("CniSessionMap", package.seeall)
 -- runway list of ROUTE ARR and LZ RWY SEL, for one), so everything is kept per page. Nothing is
 -- known about a field until something gave it away, and everything learned about a page is
 -- dropped when the sim builds the page anew.
+--
+-- A toggle with two positions gives nothing away: both positions move with every switch. Those
+-- that always start in the same position are taken to be in it the first time they are seen,
+-- and every switch is followed from there. Should an aircraft start otherwise, swap() turns the
+-- assumption around.
 -- Lua port of CniSessionMap.cs of WCtrlDcsBiosBridge, see LICENSE-WCtrlDcsBiosBridge.txt.
 
 --- @class CniSessionPage what is known about the elements of one page
+--- @field name string the page name
 --- @field known { [string]: { [string]: boolean } } per field, whether each of its elements is the lit one
 --- @field seen { [string]: { [string]: string } } per rotary, the elements last drawn for each member
 --- @field landmarks { [integer]: string }? the elements behind the page's fixed text, by slot
+
+--- @class CniStartingState a toggle that always starts in the same position
+--- @field page string the page drawing it
+--- @field fields { [string]: boolean } whether each of its fields is lit in that position
 
 --- @class CniSessionMap
 --- @field private pages { [integer]: CniSessionPage }
 --- @field private current { [string]: string } the elements drawing each field on the page last observed
 --- @field private current_page CniSessionPage? the page last observed
+--- @field private starting { [string]: CniStartingState }
+--- @field private swap_pending { [string]: boolean } toggles to take the other way round when first seen
 local CniSessionMap = {}
 
+--- @type { [string]: CniStartingState }
+CniSessionMap.STARTING_STATES = {
+	-- RTE: waypoint sequencing starts on AUTO
+	WPT_SEQ = { page = "ROUTE_GEN", fields = { route_auto = true, route_man = false } },
+}
+
+--- @param starting_states { [string]: CniStartingState }? defaults to STARTING_STATES
 --- @return CniSessionMap
-function CniSessionMap:new()
+function CniSessionMap:new(starting_states)
 	local o = {
 		pages = {},
 		current = {},
 		current_page = nil,
+		starting = starting_states or CniSessionMap.STARTING_STATES,
+		swap_pending = {},
 	}
 	setmetatable(o, self)
 	self.__index = self
@@ -283,7 +304,7 @@ end
 function CniSessionMap:observe(page, blocks, matched, states)
 	local page_record = self.pages[page.id]
 	if not page_record then
-		page_record = { known = {}, seen = {}, landmarks = nil }
+		page_record = { name = page.name, known = {}, seen = {}, landmarks = nil }
 		self.pages[page.id] = page_record
 	end
 
@@ -316,6 +337,60 @@ function CniSessionMap:observe(page, blocks, matched, states)
 			page_record.seen[selector.key] = members
 			close(known, selector, members)
 		end
+	end
+
+	for name, toggle in pairs(self.starting) do
+		if toggle.page == page.name then
+			self:assume(name, toggle, known, drawn)
+		end
+	end
+end
+
+--- Takes a toggle nothing is known about to be in its starting position
+--- @private
+--- @param name string
+--- @param toggle CniStartingState
+--- @param known { [string]: { [string]: boolean } }
+--- @param drawn { [string]: string }
+function CniSessionMap:assume(name, toggle, known, drawn)
+	local swapped = self.swap_pending[name] == true
+	local assumed = false
+	for field, lit in pairs(toggle.fields) do
+		local identity = drawn[field]
+		if identity and is_lit(known, field, identity) == nil then
+			mark(known, field, identity, lit ~= swapped)
+			assumed = true
+		end
+	end
+	if assumed then
+		self.swap_pending[name] = nil
+	end
+end
+
+--- Turns around which position a toggle with a starting state is taken to be in, for an
+--- aircraft that did not start in it. A toggle not seen yet is taken the other way round when it
+--- is first seen.
+--- @param name string a key of the starting states
+function CniSessionMap:swap(name)
+	local toggle = self.starting[name]
+	if not toggle then
+		return
+	end
+
+	local swapped = false
+	for _, page_record in pairs(self.pages) do
+		if page_record.name == toggle.page then
+			for field in pairs(toggle.fields) do
+				for identity, lit in pairs(page_record.known[field] or {}) do
+					page_record.known[field][identity] = not lit
+					swapped = true
+				end
+			end
+		end
+	end
+
+	if not swapped then
+		self.swap_pending[name] = not self.swap_pending[name] or nil
 	end
 end
 

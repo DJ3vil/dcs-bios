@@ -154,6 +154,15 @@ function CniDisplay:get_exec_lamp(seat)
 	return self.exec_lamps[seat]
 end
 
+--- Turns around the position a toggle with a starting state is taken to be in, for an aircraft
+--- that did not start in it (see CniSessionMap.STARTING_STATES)
+--- @param seat integer 1 = pilot, 2 = copilot, 3 = augmented crew
+--- @param toggle string
+function CniDisplay:swap_starting_state(seat, toggle)
+	self.sessions[seat]:swap(toggle)
+	self.seats[seat].dirty = true
+end
+
 --- @private
 function CniDisplay:log_error_once(message)
 	message = tostring(message)
