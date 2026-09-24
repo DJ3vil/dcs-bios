@@ -99,7 +99,7 @@ local function replaceSpecial(str, result)
 
 	if i ~= nil then
 		special = string.format("%s%" .. i - 1 .. "s", special, string.sub(str, i, i))
-		replaceSpecial(string.sub(str, i + 1), special)
+		return replaceSpecial(string.sub(str, i + 1), special)
 	end
 
 	return special
