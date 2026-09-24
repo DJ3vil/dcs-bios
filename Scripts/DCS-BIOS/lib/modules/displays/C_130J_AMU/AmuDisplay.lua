@@ -4,7 +4,7 @@ module("AmuDisplay", package.seeall)
 --
 -- list_indication gives the elements a page draws but not where they go, so the page layouts are
 -- read from the module's own page scripts when the aircraft is first seen (a few milliseconds per
--- export tick until done), and every page is matched against them to place its text on a 23x10
+-- export tick until done), and every page is matched against them to place its text on a 23x11
 -- grid, the same way as the CNI-MU. One unit is updated per export tick, and only when its
 -- indication changed. Which word of a toggle is selected is drawn as a background box the
 -- indication does not report, so the text comes without it.
@@ -86,7 +86,7 @@ function AmuDisplay:new(options)
 end
 
 --- @param unit integer 1 = pilot left, 2 = pilot right, 3 = copilot left, 4 = copilot right
---- @param line integer 1-10
+--- @param line integer 1-11
 --- @return string
 function AmuDisplay:get_line(unit, line)
 	return self.lines[unit][line] or BLANK_LINE
