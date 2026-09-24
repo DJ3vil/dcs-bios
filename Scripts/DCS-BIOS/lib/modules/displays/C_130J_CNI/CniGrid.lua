@@ -53,10 +53,10 @@ end
 
 --- Free for this element: empty, or holding text drawn from the same anchor (a field the sim
 --- deliberately draws over another)
-local function is_free(grid, origins, start, length, origin)
+local function is_free(grid, origins, start, length, origin, width)
 	for i = 0, length - 1 do
 		local col = start + i
-		if col >= 1 and col <= CniGrid.COLUMNS and grid[col] ~= SPACE and origins[col] ~= origin then
+		if col >= 1 and col <= width and grid[col] ~= SPACE and origins[col] ~= origin then
 			return false
 		end
 	end
@@ -65,18 +65,18 @@ end
 
 --- Nudges a run clear of text already on the line: a page can mix fonts on one line and place
 --- labels at the running width of the ones before them, which a monospaced grid cannot express
-local function reflow(grid, origins, start, length, anchor, origin)
-	if is_free(grid, origins, start, length, origin) then
+local function reflow(grid, origins, start, length, anchor, origin, width)
+	if is_free(grid, origins, start, length, origin, width) then
 		return start
 	end
 
 	local step = anchor == CniSchema.ANCHOR_RIGHT and -1 or 1
-	for shift = 1, CniGrid.COLUMNS - 1 do
+	for shift = 1, width - 1 do
 		local candidate = start + shift * step
-		if candidate < 1 or candidate + length - 1 > CniGrid.COLUMNS then
+		if candidate < 1 or candidate + length - 1 > width then
 			break
 		end
-		if is_free(grid, origins, candidate, length, origin) then
+		if is_free(grid, origins, candidate, length, origin, width) then
 			return candidate
 		end
 	end
@@ -87,17 +87,18 @@ end
 --- @param row table
 --- @param slot CniSlot
 --- @param text string
-local function place(row, slot, text)
+--- @param width integer
+local function place(row, slot, text, width)
 	local origin = slot.col
 	local length = #text
 
 	-- columns are 1-based here, the schema's 0-based
 	local start = CniGrid.start_column(slot.anchor, origin, length) + 1
-	start = reflow(row.chars, row.origins, start, length, slot.anchor, origin)
+	start = reflow(row.chars, row.origins, start, length, slot.anchor, origin, width)
 
 	for i = 1, length do
 		local col = start + i - 1
-		if col >= 1 and col <= CniGrid.COLUMNS then
+		if col >= 1 and col <= width then
 			local ch = text:sub(i, i)
 			-- a space never rubs out what is already there
 			if not (ch == SPACE and row.chars[col] ~= SPACE) then
@@ -113,13 +114,18 @@ end
 --- Renders a page
 --- @param blocks CniBlock[] in document order
 --- @param matched (CniSlot|nil)[] the slot of each block
---- @return string[] lines 14 lines of 25 characters
+--- @param columns integer? the width of the grid, 25 for the CNI-MU
+--- @param line_count integer? the height of the grid, 14 for the CNI-MU
+--- @return string[] lines one string per line
 --- @return string[] formats per character 0 large, 1 small, 2 large inverted, 3 small inverted
-function CniGrid.render(blocks, matched)
+function CniGrid.render(blocks, matched, columns, line_count)
+	columns = columns or CniGrid.COLUMNS
+	line_count = line_count or CniGrid.LINES
+
 	local rows = {}
-	for l = 0, CniGrid.LINES - 1 do
+	for l = 0, line_count - 1 do
 		local row = { chars = {}, small = {}, invert = {}, origins = {} }
-		for c = 1, CniGrid.COLUMNS do
+		for c = 1, columns do
 			row.chars[c] = SPACE
 			row.small[c] = false
 			row.invert[c] = false
@@ -130,19 +136,19 @@ function CniGrid.render(blocks, matched)
 
 	for i = 1, #blocks do
 		local slot = matched[i]
-		if slot and CniSchema.is_placeable(slot) and slot.line < CniGrid.LINES then
+		if slot and CniSchema.is_placeable(slot) and slot.line < line_count then
 			local text = CniGrid.map_glyphs(blocks[i].v)
 			if text ~= "" then
-				place(rows[slot.line], slot, text)
+				place(rows[slot.line], slot, text, columns)
 			end
 		end
 	end
 
 	local lines, formats = {}, {}
-	for l = 0, CniGrid.LINES - 1 do
+	for l = 0, line_count - 1 do
 		local row = rows[l]
 		local format = {}
-		for c = 1, CniGrid.COLUMNS do
+		for c = 1, columns do
 			-- a blank belongs to a run only inside inverted text, whose background covers it
 			if row.chars[c] ~= SPACE or row.invert[c] then
 				format[c] = (row.small[c] and 1 or 0) + (row.invert[c] and 2 or 0)

@@ -1,6 +1,7 @@
 lfs = require("Scripts.DCS-BIOS.test.compile.lfs")
 
 require("Scripts.DCS-BIOS.test.AircraftTest") -- high-level tests for specific aircraft
+require("Scripts.DCS-BIOS.test.C130JAmuTest") -- unit tests for the C-130J AMU displays
 require("Scripts.DCS-BIOS.test.C130JCniTest") -- unit tests for the C-130J CNI-MU displays
 require("Scripts.DCS-BIOS.test.C130JCniSessionTest") -- unit tests for the highlights learned during a session
 require("Scripts.DCS-BIOS.test.ConnectionManagerTest") -- unit tests for send/receive logic

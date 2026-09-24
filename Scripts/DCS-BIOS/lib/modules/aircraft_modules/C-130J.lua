@@ -2,6 +2,7 @@ module("C-130J", package.seeall)
 
 local ActionArgument = require("Scripts.DCS-BIOS.lib.modules.documentation.ActionArgument")
 local ActionInput = require("Scripts.DCS-BIOS.lib.modules.documentation.ActionInput")
+local AmuDisplay = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_AMU.AmuDisplay")
 local BIOSConfig = require("Scripts.DCS-BIOS.BIOSConfig")
 local CniDisplay = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniDisplay")
 local CommonPositions = require("Scripts.DCS-BIOS.lib.modules.CommonPositions")
@@ -2063,6 +2064,30 @@ for seat, info in ipairs(CNI_DISPLAY_SEATS) do
 	end, 1, info.category, info.description .. " EXEC Light (derived from the display and the EXEC keys)")
 
 	define_cni_swap(info.prefix .. "_CNI_WPT_SEQ_SWAP", seat, "WPT_SEQ", info.category, info.description .. " Display: Swap the WPT SEQ highlight (AUTO/MAN) if the aircraft did not start on AUTO")
+end
+
+-- AMU Displays
+
+-- in the order the module registers them: pilot left and right, copilot left and right
+local AMU_DISPLAYS = {
+	{ prefix = "LO_AMU", category = LO_AMU, description = "Left Outer AMU" },
+	{ prefix = "LI_AMU", category = LI_AMU, description = "Left Inner AMU" },
+	{ prefix = "RI_AMU", category = RI_AMU, description = "Right Inner AMU" },
+	{ prefix = "RO_AMU", category = RO_AMU, description = "Right Outer AMU" },
+}
+
+local amu_display = AmuDisplay:new()
+
+C_130J:addExportHook(function()
+	amu_display:update()
+end)
+
+for unit, info in ipairs(AMU_DISPLAYS) do
+	for line = 1, AmuDisplay.LINES do
+		C_130J:defineString(info.prefix .. "_LINE" .. line, function()
+			return amu_display:get_line(unit, line)
+		end, AmuDisplay.COLUMNS, info.category, info.description .. " Display Line " .. line)
+	end
 end
 
 return C_130J

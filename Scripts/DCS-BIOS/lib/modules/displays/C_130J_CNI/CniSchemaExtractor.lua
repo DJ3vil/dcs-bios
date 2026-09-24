@@ -78,8 +78,9 @@ end
 --- @param recorder table receives every element the script Add()s
 --- @param script_path string
 --- @param common_path string
+--- @param after_dofile (fun(name: string, env: table))? called after every file a script loads
 --- @return table
-local function new_env(recorder, script_path, common_path)
+local function new_env(recorder, script_path, common_path, after_dofile)
 	local guid_seq = 0
 
 	-- deterministic stand-ins for the engine's random GUIDs, which change every session
@@ -156,6 +157,7 @@ local function new_env(recorder, script_path, common_path)
 		-- cockpit globals normally provided by the engine
 		CreateElement = CreateElement,
 		Add = Add,
+		AddGeneral = Add,
 		create_guid_string = create_guid_string,
 		SetScale = noop,
 		GetScale = function()
@@ -231,6 +233,10 @@ local function new_env(recorder, script_path, common_path)
 			if type(lines) == "table" and lines[13] == nil and lines[12] and lines[11] then
 				lines[13] = lines[12] - (lines[11] - lines[12])
 			end
+		end
+
+		if after_dofile then
+			after_dofile(basename(path), base)
 		end
 
 		return result
@@ -436,9 +442,11 @@ local function exists(path)
 end
 
 --- Finds the module's cockpit scripts in the DCS installation
+--- @param marker string? a file the scripts folder holds, CNI_MU/init_gen.lua by default
 --- @return string? script_path
 --- @return string? common_path
-function CniSchemaExtractor.find_script_root()
+function CniSchemaExtractor.find_script_root(marker)
+	marker = marker or "CNI_MU/init_gen.lua"
 	if lfs == nil or lfs.currentdir == nil then
 		return nil, nil
 	end
@@ -468,7 +476,7 @@ function CniSchemaExtractor.find_script_root()
 
 		for _, folder in ipairs(folders) do
 			local scripts = root .. "Mods/aircraft/" .. folder .. "/Cockpit/Scripts/"
-			if exists(scripts .. "CNI_MU/init_gen.lua") then
+			if exists(scripts .. marker) then
 				return scripts, common
 			end
 		end
@@ -508,6 +516,25 @@ function CniSchemaExtractor.catalogue(script_path, common_path)
 		return a.id < b.id
 	end)
 	return pages
+end
+
+--- The sandbox the page scripts run in, for the other displays the module builds the same way
+--- @param recorder table receives every element the script Add()s
+--- @param script_path string
+--- @param common_path string
+--- @param after_dofile (fun(name: string, env: table))? called after every file a script loads
+--- @return table
+function CniSchemaExtractor.new_sandbox(recorder, script_path, common_path, after_dofile)
+	return new_env(recorder, script_path, common_path, after_dofile)
+end
+
+--- Runs a script in a sandbox
+--- @param path string
+--- @param env table
+--- @return boolean? ok
+--- @return string? error
+function CniSchemaExtractor.run_file(path, env)
+	return run_file(path, env)
 end
 
 --- Replays one page script and records what it builds. A page that fails part-way still
