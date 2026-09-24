@@ -2090,4 +2090,13 @@ for unit, info in ipairs(AMU_DISPLAYS) do
 	end
 end
 
+-- after all lines, so that the lines keep their addresses
+for unit, info in ipairs(AMU_DISPLAYS) do
+	for line = 1, AmuDisplay.LINES do
+		C_130J:defineString(info.prefix .. "_LINE" .. line .. "_FORMAT", function()
+			return amu_display:get_format(unit, line)
+		end, AmuDisplay.COLUMNS, info.category, info.description .. " Display Line " .. line .. " Format (0=plain, 2=highlighted)")
+	end
+end
+
 return C_130J

@@ -6,8 +6,9 @@ module("AmuDisplay", package.seeall)
 -- read from the module's own page scripts when the aircraft is first seen (a few milliseconds per
 -- export tick until done), and every page is matched against them to place its text on a 23x11
 -- grid, the same way as the CNI-MU. One unit is updated per export tick, and only when its
--- indication changed. Which word of a toggle is selected is drawn as a background box the
--- indication does not report, so the text comes without it.
+-- indication changed. An entry the page draws on a box of its own, such as one being edited,
+-- comes with a highlight format. Which word of a toggle is selected is a box the module switches
+-- on and off itself, which the indication does not report, so toggles come without it.
 
 local AmuSchemaExtractor = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_AMU.AmuSchemaExtractor")
 local CniBlockMatcher = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniBlockMatcher")
@@ -40,6 +41,7 @@ local LOAD_BUDGET = 0.003 -- seconds of layout loading per export tick
 local MIN_LANDMARKS = 2
 
 local BLANK_LINE = string.rep(" ", AmuDisplay.COLUMNS)
+local PLAIN_FORMAT = string.rep("0", AmuDisplay.COLUMNS)
 
 --- @param options AmuDisplayOptions?
 --- @return AmuDisplay
@@ -53,6 +55,7 @@ function AmuDisplay:new(options)
 		load_pages = options.load_pages,
 
 		lines = {},
+		formats = {},
 		page_names = {},
 		units = {},
 
@@ -75,8 +78,10 @@ function AmuDisplay:new(options)
 		o.units[unit] = { raw = nil }
 		o.page_names[unit] = ""
 		o.lines[unit] = {}
+		o.formats[unit] = {}
 		for line = 1, AmuDisplay.LINES do
 			o.lines[unit][line] = BLANK_LINE
+			o.formats[unit][line] = PLAIN_FORMAT
 		end
 	end
 
@@ -90,6 +95,14 @@ end
 --- @return string
 function AmuDisplay:get_line(unit, line)
 	return self.lines[unit][line] or BLANK_LINE
+end
+
+--- How each character of a line is drawn, as for the CNI-MU: 0 plain, 2 highlighted
+--- @param unit integer
+--- @param line integer 1-11
+--- @return string
+function AmuDisplay:get_format(unit, line)
+	return self.formats[unit][line] or PLAIN_FORMAT
 end
 
 --- @param unit integer
@@ -282,6 +295,7 @@ end
 function AmuDisplay:blank(unit)
 	for line = 1, AmuDisplay.LINES do
 		self.lines[unit][line] = BLANK_LINE
+		self.formats[unit][line] = PLAIN_FORMAT
 	end
 	self.page_names[unit] = ""
 end
@@ -311,9 +325,10 @@ function AmuDisplay:process_unit(unit)
 	end
 
 	local matched = CniBlockMatcher.align(flat, page.slots)
-	local lines = CniGrid.render(flat, matched, AmuDisplay.COLUMNS, AmuDisplay.LINES)
+	local lines, formats = CniGrid.render(flat, matched, AmuDisplay.COLUMNS, AmuDisplay.LINES)
 
 	self.lines[unit] = lines
+	self.formats[unit] = formats
 	self.page_names[unit] = page.name
 end
 

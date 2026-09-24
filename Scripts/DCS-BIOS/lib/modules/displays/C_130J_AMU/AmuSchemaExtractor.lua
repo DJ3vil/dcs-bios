@@ -161,6 +161,8 @@ local function describe(env, el, ordinal)
 		anchor = anchor,
 		line = line_of(env, pos[2]),
 		col = column_of(env, el, pos[1], anchor),
+		-- drawn on a box, like an entry being edited
+		invert = el.UseBackGround == true or nil,
 	}
 end
 

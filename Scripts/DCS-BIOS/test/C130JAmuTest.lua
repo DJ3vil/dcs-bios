@@ -49,6 +49,10 @@ local MENU = indication({ "", "TEST MENU", "<ALPHA", "<BRAVO", "<CHARLIE", "DELT
 local DISPLAY = indication({ "", "TEST DISPLAY", "PILOT", "/", "COPILOT", "BARO", "IN", "/", "MB", "MAG", "/", "TRUE", "/", "GRID", "SOURCE", "CP", "2", "/", "1", "REF UNIT", "MENU>" }, "D")
 local RANGE = indication({ "RANGE     >", "20>", "", "RANGE PAGE", "TEST RANGE", "MENU>" }, "R")
 local DARK = indication({ "" }, "B")
+-- the entry beside L1 being edited: its boxed copy is drawn instead of the plain one
+local EDITING = indication({ "<LEVEL 50", "", "EDIT PAGE", "SET>", "MENU>" }, "E")
+local EDIT_DONE = indication({ "", "EDIT PAGE", "<LEVEL 50%", "SET>", "MENU>" }, "F")
+local PLAIN = string.rep("0", AmuDisplay.COLUMNS)
 
 --- @param indications { [integer]: string }
 --- @return AmuDisplay
@@ -76,7 +80,7 @@ function TestC130JAmu:testExtractorReadsThePages()
 		for i, entry in ipairs(catalogue) do
 			names[i] = entry.name
 		end
-		lu.assertEquals(names, { "MENU", "DISPLAY", "RANGE_PAGE" })
+		lu.assertEquals(names, { "MENU", "DISPLAY", "RANGE_PAGE", "EDIT" })
 
 		local page = AmuSchemaExtractor.extract_page(script_path, common_path, catalogue[2])
 		lu.assertNil(page.error)
@@ -113,6 +117,23 @@ function TestC130JAmu:testExtractorReadsThePages()
 			"REF UNIT 3:19R",
 			"MENU> 9:23R",
 		})
+	end)
+end
+
+function TestC130JAmu:testExtractorMarksBoxedEntries()
+	with_test_install(function()
+		local script_path, common_path = CniSchemaExtractor.find_script_root()
+		local catalogue = AmuSchemaExtractor.catalogue(script_path, common_path)
+		local page = AmuSchemaExtractor.extract_page(script_path, common_path, catalogue[4])
+		lu.assertNil(page.error)
+
+		local boxed = {}
+		for _, slot in ipairs(page.slots) do
+			if slot.fmt then
+				boxed[slot.fmt[1]] = slot.invert == true
+			end
+		end
+		lu.assertEquals(boxed, { ["<LEVEL %s"] = true, ["<LEVEL %s%%"] = false })
 	end)
 end
 
@@ -164,6 +185,34 @@ function TestC130JAmu:testUnitsFollowTheirPages()
 		indications[18] = DARK
 		run(display, 8)
 		lu.assertEquals(display:get_line(1, 3), BLANK)
+	end)
+end
+
+function TestC130JAmu:testEntryBeingEditedIsHighlighted()
+	with_test_install(function()
+		local indications = { [18] = EDITING, [19] = DISPLAY }
+		local display = new_display(indications)
+		run(display)
+
+		lu.assertEquals(display:get_page(1), "EDIT")
+		lu.assertEquals(display:get_line(1, 3), "<LEVEL 50              ")
+		lu.assertEquals(display:get_format(1, 3), "222222222" .. string.rep("0", 14))
+		lu.assertEquals(display:get_line(1, 4), "                   SET>")
+		lu.assertEquals(display:get_format(1, 4), PLAIN)
+
+		-- the words of a toggle come without the box of the selected one
+		for line = 1, AmuDisplay.LINES do
+			lu.assertEquals(display:get_format(2, line), PLAIN)
+		end
+
+		indications[18] = EDIT_DONE
+		run(display, 8)
+		lu.assertEquals(display:get_line(1, 3), "<LEVEL 50%             ")
+		lu.assertEquals(display:get_format(1, 3), PLAIN)
+
+		indications[18] = DARK
+		run(display, 8)
+		lu.assertEquals(display:get_format(1, 3), PLAIN)
 	end)
 end
 
