@@ -1,5 +1,7 @@
 module("C-130J", package.seeall)
 
+local BIOSConfig = require("Scripts.DCS-BIOS.BIOSConfig")
+local CniDisplay = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniDisplay")
 local CommonPositions = require("Scripts.DCS-BIOS.lib.modules.CommonPositions")
 local Control = require("Scripts.DCS-BIOS.lib.modules.documentation.Control")
 local ControlAttributeDocumentation = require("Scripts.DCS-BIOS.lib.modules.documentation.ControlAttributeDocumentation")
@@ -1990,5 +1992,43 @@ C_130J:defineReadWriteRadio("RADIO_HF2", 11, 7, 3, 1000, "HF 2")
 C_130J:defineReadWriteRadio("RADIO_ADF1", 16, 6, 1, 10, "ADF 1")
 C_130J:defineReadWriteRadio("RADIO_ADF2", 17, 6, 1, 10, "ADF 2")
 C_130J:defineReadWriteRadio("RADIO_ARC210", 92, 7, 3, 1000, "ARC-210")
+
+-- CNI-MU Displays
+
+local CNI_DISPLAY_SEATS = {
+	{ prefix = "PLT", category = PLT_CNI_MU, description = "Pilot CNI-MU" },
+	{ prefix = "CPLT", category = CPLT_CNI_MU, description = "Copilot CNI-MU" },
+	{ prefix = "AUG", category = AUG_CNI_MU, description = "Aug Crew CNI-MU" },
+}
+
+local cni_display = CniDisplay:new({
+	debug_file = BIOSConfig.c130j_cni_debug and (lfs.writedir() .. [[Logs/DCS-BIOS-C-130J-CNI.log]]) or nil,
+})
+
+C_130J:addExportHook(function(dev0)
+	cni_display:update(dev0)
+end)
+
+for seat, info in ipairs(CNI_DISPLAY_SEATS) do
+	for line = 1, CniDisplay.LINES do
+		C_130J:defineString(info.prefix .. "_CNI_LINE" .. line, function()
+			return cni_display:get_line(seat, line)
+		end, CniDisplay.COLUMNS, info.category, info.description .. " Display Line " .. line)
+	end
+
+	for line = 1, CniDisplay.LINES do
+		C_130J:defineString(info.prefix .. "_CNI_LINE" .. line .. "_FORMAT", function()
+			return cni_display:get_format(seat, line)
+		end, CniDisplay.COLUMNS, info.category, info.description .. " Display Line " .. line .. " Format (0=large, 1=small, 2=large inverted, 3=small inverted)")
+	end
+
+	C_130J:defineString(info.prefix .. "_CNI_PAGE", function()
+		return cni_display:get_page(seat)
+	end, 24, info.category, info.description .. " Display Page Name (best effort)")
+
+	C_130J:defineIntegerFromGetter(info.prefix .. "_CNI_EXEC_LAMP", function()
+		return cni_display:get_exec_lamp(seat) and 1 or 0
+	end, 1, info.category, info.description .. " EXEC Light (derived from the display and the EXEC keys)")
+end
 
 return C_130J
