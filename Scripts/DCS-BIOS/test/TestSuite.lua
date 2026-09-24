@@ -5,6 +5,7 @@ require("Scripts.DCS-BIOS.test.C130JCniTest") -- unit tests for the C-130J CNI-M
 require("Scripts.DCS-BIOS.test.C130JCniSessionTest") -- unit tests for the highlights learned during a session
 require("Scripts.DCS-BIOS.test.ConnectionManagerTest") -- unit tests for send/receive logic
 require("Scripts.DCS-BIOS.test.F15EUfcTest") -- unit tests for the F-15E UFC lines
+require("Scripts.DCS-BIOS.test.IndicatorDumpTest") -- unit tests for the indicator troubleshooting log
 require("Scripts.DCS-BIOS.test.MemoryMapTest") -- unit tests for the memory map
 require("Scripts.DCS-BIOS.test.MemoryMapEntryTest") -- unit tests for memory map entries
 require("Scripts.DCS-BIOS.test.ModuleTest") -- unit tests for core aircraft module functionality

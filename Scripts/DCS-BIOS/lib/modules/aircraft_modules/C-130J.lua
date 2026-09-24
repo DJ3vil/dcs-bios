@@ -10,6 +10,7 @@ local ControlAttributeDocumentation = require("Scripts.DCS-BIOS.lib.modules.docu
 local ControlType = require("Scripts.DCS-BIOS.lib.modules.documentation.ControlType")
 local FixedStepInput = require("Scripts.DCS-BIOS.lib.modules.documentation.FixedStepInput")
 local Functions = require("Scripts.DCS-BIOS.lib.common.Functions")
+local IndicatorDump = require("Scripts.DCS-BIOS.lib.modules.displays.IndicatorDump")
 local IntegerOutput = require("Scripts.DCS-BIOS.lib.modules.documentation.IntegerOutput")
 local Module = require("Scripts.DCS-BIOS.lib.modules.Module")
 local SetStateInput = require("Scripts.DCS-BIOS.lib.modules.documentation.SetStateInput")
@@ -2010,6 +2011,14 @@ local cni_display = CniDisplay:new({
 C_130J:addExportHook(function(dev0)
 	cni_display:update(dev0)
 end)
+
+-- what the other displays report, for working out how to export them
+if BIOSConfig.c130j_cni_debug then
+	local indicator_dump = IndicatorDump:new({ file = lfs.writedir() .. [[Logs/DCS-BIOS-C-130J-Indicators.log]] })
+	C_130J:addExportHook(function()
+		indicator_dump:update()
+	end)
+end
 
 --- Adds an input turning around the position the display takes a CNI-MU toggle to start in, for
 --- an aircraft that did not start in it. Only the exported display changes, not the aircraft.
