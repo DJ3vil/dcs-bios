@@ -73,6 +73,36 @@ local COMM_TUNE_U1 = {
 	},
 }
 
+-- and of the route page, where WPT SEQ and WP TRANS are two decisions whose fields share a stem
+local ROUTE = {
+	id = 3,
+	name = "ROUTE_GEN",
+	slots = {
+		slot(1, { name = "cni_title", ctrl = "rte_pg_title", fmt = { "%sRTE %d" }, anchor = "Center", line = 0, col = 13 }),
+		slot(2, { value = " ORIGIN", line = 1, col = 0, small = true }),
+		slot(3, { value = "WPT SEQ ", line = 7, col = 25, anchor = "Right", small = true }),
+		slot(4, { ctrl = "route_auto_on", value = "AUTO", line = 8, col = 25, anchor = "Right", invert = true }),
+		slot(5, { ctrl = "route_auto_off", value = "AUTO", line = 8, col = 25, anchor = "Right", small = true }),
+		slot(6, { ctrl = "route_auto_on", value = "/", line = 8, col = 21, anchor = "Right" }),
+		slot(7, { ctrl = "route_auto_off", value = "/", line = 8, col = 21, anchor = "Right" }),
+		slot(8, { ctrl = "route_man_on", value = "MAN", line = 8, col = 20, anchor = "Right", invert = true }),
+		slot(9, { ctrl = "route_man_off", value = "MAN", line = 8, col = 20, anchor = "Right", small = true }),
+		slot(10, { value = "WP TRANS ", line = 9, col = 25, anchor = "Right", small = true }),
+		slot(11, { ctrl = "route_pp_on", value = "P-P", line = 10, col = 25, anchor = "Right", invert = true }),
+		slot(12, { ctrl = "route_pp_off", value = "P-P", line = 10, col = 25, anchor = "Right", small = true }),
+		slot(13, { ctrl = "route_pp_on", value = "/", line = 10, col = 22, anchor = "Right" }),
+		slot(14, { ctrl = "route_pp_off", value = "/", line = 10, col = 22, anchor = "Right" }),
+		slot(15, { ctrl = "route_nom_on", value = "ROT", line = 10, col = 21, anchor = "Right", invert = true }),
+		slot(16, { ctrl = "route_nom_off", value = "ROT", line = 10, col = 21, anchor = "Right", small = true }),
+		slot(17, { ctrl = "route_nom_on", value = "/", line = 10, col = 18, anchor = "Right" }),
+		slot(18, { ctrl = "route_nom_off", value = "/", line = 10, col = 18, anchor = "Right" }),
+		slot(19, { ctrl = "route_cp_on", value = "CP", line = 10, col = 17, anchor = "Right", invert = true }),
+		slot(20, { ctrl = "route_cp_off", value = "CP", line = 10, col = 17, anchor = "Right", small = true }),
+		slot(21, { value = "<DEP/ARR", line = 10, col = 0 }),
+		slot(22, { name = "cni_scratchpad", ctrl = "scratch", fmt = { "%s" }, line = 13, col = 0 }),
+	},
+}
+
 --- @param elements string[][] name and text of every element, in the order the sim sends them
 --- @return string
 local function indication(elements)
@@ -88,11 +118,13 @@ end
 --- generates anew whenever it builds the page
 --- @param lit string GPS, LAST or REF
 --- @param session string?
+--- @param replace { [string]: string }? element names to use instead, by the name they replace
 --- @return string
-local function power_up(lit, session)
+local function power_up(lit, session, replace)
 	session = session or "A"
 	local function el(name, on)
-		return "{" .. session .. "-" .. name .. (on and "-LIT}" or "-PLAIN}")
+		local element = "{" .. session .. "-" .. name .. (on and "-LIT}" or "-PLAIN}")
+		return replace and replace[element] or element
 	end
 	local function fixed(name)
 		return "{" .. session .. "-" .. name .. "}"
@@ -113,13 +145,39 @@ local function power_up(lit, session)
 	})
 end
 
+--- The route page with the given WPT SEQ and WP TRANS positions lit
+--- @param seq string AUTO or MAN
+--- @param trans string P-P, ROT or CP
+--- @return string
+local function route(seq, trans)
+	local function el(name, on)
+		return "{" .. name .. (on and "-LIT}" or "-PLAIN}")
+	end
+	return indication({
+		{ "cni_title", "RTE 1" },
+		{ "{ORIGIN}", " ORIGIN" },
+		{ "{WPT-SEQ}", "WPT SEQ " },
+		{ el("AUTO", seq == "AUTO"), "AUTO" },
+		{ el("AUTO-SLASH", seq == "AUTO"), "/" },
+		{ el("MAN", seq == "MAN"), "MAN" },
+		{ "{WP-TRANS}", "WP TRANS " },
+		{ el("PP", trans == "P-P"), "P-P" },
+		{ el("PP-SLASH", trans == "P-P"), "/" },
+		{ el("ROT", trans == "ROT"), "ROT" },
+		{ el("ROT-SLASH", trans == "ROT"), "/" },
+		{ el("CP", trans == "CP"), "CP" },
+		{ "{DEP-ARR}", "<DEP/ARR" },
+		{ "cni_scratchpad", "" },
+	})
+end
+
 --- COMM TUNE U1 with the power toggle and the ADF/BTH/MN rotary drawn by the given elements
---- @param options { channel: string?, power: string?, adf_lit: boolean?, bth: string?, mn: string? }
+--- @param options { channel: string?, power: string?, adf_lit: boolean?, bth: string?, mn: string?, prefix: string? }
 --- @return string
 local function comm_tune(options)
 	local power = options.power or "ON"
 	local adf_lit = options.adf_lit
-	return indication({
+	local elements = {
 		{ "cni_title", "COMM TUNE U1" },
 		{ "{IDENT}", "IDENT" },
 		{ "{CHAN}", options.channel or "  1/243.000R" },
@@ -134,7 +192,16 @@ local function comm_tune(options)
 		{ options.mn or "{MN-PLAIN}", "MN" },
 		{ "{COMM-INDEX}", "<COMM INDEX" },
 		{ "cni_scratchpad", "" },
-	})
+	}
+	-- another page drawing the same fields does so with elements of its own
+	if options.prefix then
+		for _, element in ipairs(elements) do
+			if element[1] ~= "cni_title" and element[1] ~= "cni_scratchpad" then
+				element[1] = "{" .. options.prefix .. "}" .. element[1]
+			end
+		end
+	end
+	return indication(elements)
 end
 
 --- Renders a page and returns the words drawn highlighted
@@ -151,7 +218,7 @@ local function lit_words(map, page, raw, radios)
 
 	local words = {}
 	for line = 1, CniGrid.LINES do
-		for start, word, stop in lines[line]:gmatch("()(%u+)()") do
+		for start, word, stop in lines[line]:gmatch("()([%u%-]+)()") do
 			if formats[line]:sub(start, stop - 1):match("^[23]+$") then
 				words[#words + 1] = word
 			end
@@ -253,6 +320,62 @@ function TestC130JCniSession:testTextEvidenceSettlesTheMembersBesideIt()
 	-- so the first turn away from ADF already says which of the two it went to
 	lu.assertEquals(lit_words(map, page, comm_tune({ adf_lit = false, bth = "{BTH-B}", mn = "{MN-A}" }), radios), { "ON", "BTH" })
 	lu.assertEquals(lit_words(map, page, comm_tune({ adf_lit = false, bth = "{BTH-A}", mn = "{MN-B}" }), radios), { "ON", "MN" })
+end
+
+function TestC130JCniSession:testTwoDecisionsSharingAStemStayApart()
+	local page = CniSchema.prepare_page(ROUTE)
+	-- WPT SEQ has two positions only, WP TRANS two lines below is a rotary of its own
+	lu.assertEquals(page.selectors, {
+		{ key = "route@10", members = { "route_cp", "route_nom", "route_pp" } },
+	})
+
+	local map = CniSessionMap:new()
+	local frames = {
+		{ "AUTO", "P-P" },
+		{ "MAN", "P-P" },
+		{ "MAN", "ROT" },
+		{ "AUTO", "ROT" },
+		{ "AUTO", "CP" },
+		{ "MAN", "CP" },
+		{ "MAN", "P-P" },
+		{ "AUTO", "P-P" },
+	}
+	for _, frame in ipairs(frames) do
+		-- a highlight is only ever drawn where the cockpit has one
+		for _, word in ipairs(lit_words(map, page, route(frame[1], frame[2]))) do
+			lu.assertTrue(word == frame[2], word .. " drawn lit with " .. frame[1] .. " and " .. frame[2] .. " selected")
+		end
+	end
+
+	-- WP TRANS has been through its three positions and follows the cockpit, WPT SEQ cannot be told
+	lu.assertEquals(lit_words(map, page, route("MAN", "ROT")), { "ROT" })
+	lu.assertEquals(lit_words(map, page, route("AUTO", "CP")), { "CP" })
+end
+
+function TestC130JCniSession:testPagesKeepWhatWasLearnedApart()
+	local first = CniSchema.prepare_page(COMM_TUNE_U1)
+	local second = CniSchema.prepare_page({ id = 4, name = "UHF1_OTHER", slots = COMM_TUNE_U1.slots })
+	local map = CniSessionMap:new()
+
+	-- the radio is off, which the first page proves while it prints the frequency the radio is on
+	lu.assertEquals(lit_word(map, first, comm_tune({ power = "OFF" }), { { frequency = 243000, on = false } }), "OFF")
+
+	-- the second page draws the same fields with elements of its own and proves nothing
+	lu.assertNil(lit_word(map, second, comm_tune({ power = "OFF", prefix = "B", channel = "   /---.---" }), {}))
+	lu.assertNil(lit_word(map, second, comm_tune({ power = "ON", prefix = "B", channel = "   /---.---" }), {}))
+
+	-- and what the first page proved is still there when it comes back
+	lu.assertEquals(lit_word(map, first, comm_tune({ power = "OFF", channel = "   /---.---" }), {}), "OFF")
+end
+
+function TestC130JCniSession:testAChangeThatIsNoTurnTeachesNothing()
+	local page = CniSchema.prepare_page(POWER_UP)
+	local map = CniSessionMap:new()
+	lu.assertNil(lit_word(map, page, power_up("LAST")))
+
+	-- only GPS changed element, which no turn of a rotary does
+	lu.assertNil(lit_word(map, page, power_up("LAST", "A", { ["{A-GPS-PLAIN}"] = "{A-GPS-OTHER}" })))
+	lu.assertNil(lit_word(map, page, power_up("LAST")))
 end
 
 function TestC130JCniSession:testDisplayLearnsPerSeat()

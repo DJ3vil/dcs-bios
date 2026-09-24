@@ -9,29 +9,34 @@ module("CniSessionMap", package.seeall)
 -- keeping once it has been had. Answers come from two places:
 -- - what a page proved about a field by itself (see CniVariants), kept against the element that
 --   carried it, so the reading still holds on the frames that cannot give it
--- - the crew turning a rotary: two positions swap element and the rest hold, and a position that
---   held was not the lit one on either side of the turn. That alone reads POWER UP's
---   GPS/LAST/REF, which nothing else in the aircraft follows
+-- - the crew turning a rotary: the position that went out and the one that came in swap element
+--   and the rest hold, and a position that held was not the lit one on either side of the turn.
+--   That alone reads POWER UP's GPS/LAST/REF, which nothing else in the aircraft follows
 -- A field draws one of two forms, so knowing either one settles the other.
 --
--- Nothing is known about a field until something gave it away, and everything learned about a
--- page is dropped when the sim builds the page anew.
+-- Every page builds elements of its own, also for the fields it shares with other pages (the
+-- runway list of ROUTE ARR and LZ RWY SEL, for one), so everything is kept per page. Nothing is
+-- known about a field until something gave it away, and everything learned about a page is
+-- dropped when the sim builds the page anew.
 -- Lua port of CniSessionMap.cs of WCtrlDcsBiosBridge, see LICENSE-WCtrlDcsBiosBridge.txt.
 
+--- @class CniSessionPage what is known about the elements of one page
+--- @field known { [string]: { [string]: boolean } } per field, whether each of its elements is the lit one
+--- @field seen { [string]: { [string]: string } } per rotary, the elements last drawn for each member
+--- @field landmarks { [integer]: string }? the elements behind the page's fixed text, by slot
+
 --- @class CniSessionMap
---- @field private known { [string]: { [string]: boolean } } per field, whether each of its elements is the lit one
---- @field private seen { [string]: { [string]: string } } per rotary, the elements last drawn for each member
+--- @field private pages { [integer]: CniSessionPage }
 --- @field private current { [string]: string } the elements drawing each field on the page last observed
---- @field private landmarks { [integer]: { [integer]: string } } per page, the elements behind its fixed text
+--- @field private current_page CniSessionPage? the page last observed
 local CniSessionMap = {}
 
 --- @return CniSessionMap
 function CniSessionMap:new()
 	local o = {
-		known = {},
-		seen = {},
+		pages = {},
 		current = {},
-		landmarks = {},
+		current_page = nil,
 	}
 	setmetatable(o, self)
 	self.__index = self
@@ -83,12 +88,12 @@ local function members_of(selector, drawn)
 end
 
 --- Whether that element of the field is the lit one, nil if not known
---- @private
+--- @param known { [string]: { [string]: boolean } }
 --- @param field string
 --- @param identity string
 --- @return boolean?
-function CniSessionMap:is_lit(field, identity)
-	local elements = self.known[field]
+local function is_lit(known, field, identity)
+	local elements = known[field]
 	if not elements then
 		return nil
 	end
@@ -116,15 +121,15 @@ function CniSessionMap:is_lit(field, identity)
 	return nil
 end
 
---- @private
+--- @param known { [string]: { [string]: boolean } }
 --- @param field string
 --- @param identity string
 --- @param lit boolean
-function CniSessionMap:mark(field, identity, lit)
-	local elements = self.known[field]
+local function mark(known, field, identity, lit)
+	local elements = known[field]
 	if not elements then
 		elements = {}
-		self.known[field] = elements
+		known[field] = elements
 	end
 
 	local was = elements[identity]
@@ -146,23 +151,23 @@ function CniSessionMap:mark(field, identity, lit)
 end
 
 --- Writes down what the frame proved, as a fact about the elements that carried it
---- @private
+--- @param known { [string]: { [string]: boolean } }
 --- @param states { [string]: boolean|string }
 --- @param drawn { [string]: string }
-function CniSessionMap:record(states, drawn)
+local function record(known, states, drawn)
 	for field, state in pairs(states) do
 		local identity = drawn[field]
 		if (state == true or state == false) and identity then
-			self:mark(field, identity, state)
+			mark(known, field, identity, state)
 		end
 	end
 end
 
---- @private
+--- @param known { [string]: { [string]: boolean } }
 --- @param selector CniSelector
 --- @param before { [string]: string }
 --- @param now { [string]: string }
-function CniSessionMap:compare(selector, before, now)
+local function compare(known, selector, before, now)
 	local held = {}
 	for _, member in ipairs(selector.members) do
 		if before[member] ~= nil and before[member] == now[member] then
@@ -170,32 +175,33 @@ function CniSessionMap:compare(selector, before, now)
 		end
 	end
 
-	-- nothing moved, so nothing happened
-	if #held == #selector.members then
-		return
-	end
-
 	-- every member moved, so the page was rebuilt and the old elements mean nothing any more
 	if #held == 0 then
 		for _, member in ipairs(selector.members) do
-			self.known[member] = nil
+			known[member] = nil
 		end
 		return
 	end
 
+	-- a turn moves the position that went out and the one that came in, nothing else; any other
+	-- change is not one this can reason about
+	if #selector.members - #held ~= 2 then
+		return
+	end
+
 	for _, member in ipairs(held) do
-		self:mark(member, now[member], false)
+		mark(known, member, now[member], false)
 	end
 end
 
 --- Reads off what the picture forces, given everything known so far
---- @private
+--- @param known { [string]: { [string]: boolean } }
 --- @param selector CniSelector
 --- @param drawn { [string]: string }
-function CniSessionMap:close(selector, drawn)
+local function close(known, selector, drawn)
 	local lit, any_lit = {}, false
 	for _, member in ipairs(selector.members) do
-		if self:is_lit(member, drawn[member]) == true then
+		if is_lit(known, member, drawn[member]) == true then
 			lit[member] = true
 			any_lit = true
 		end
@@ -205,7 +211,7 @@ function CniSessionMap:close(selector, drawn)
 	if any_lit then
 		for _, member in ipairs(selector.members) do
 			if not lit[member] then
-				self:mark(member, drawn[member], false)
+				mark(known, member, drawn[member], false)
 			end
 		end
 		return
@@ -213,24 +219,23 @@ function CniSessionMap:close(selector, drawn)
 
 	local open = {}
 	for _, member in ipairs(selector.members) do
-		if self:is_lit(member, drawn[member]) == nil then
+		if is_lit(known, member, drawn[member]) == nil then
 			open[#open + 1] = member
 		end
 	end
 	if #open == 1 then
-		self:mark(open[1], drawn[open[1]], true)
+		mark(known, open[1], drawn[open[1]], true)
 	end
 end
 
---- Whether the sim has built this page afresh since it was last seen. A literal written into
---- the page script cannot move with any state, so the element behind it only changes when the
---- whole page is rebuilt, and then all of them change
---- @private
---- @param page CniPage
+--- Whether the sim has built the page afresh since it was last seen. A literal written into the
+--- page script cannot move with any state, so the element behind it only changes when the whole
+--- page is rebuilt, and then all of them change
+--- @param page_record CniSessionPage
 --- @param blocks CniBlock[]
 --- @param matched (CniSlot|nil)[]
 --- @return boolean
-function CniSessionMap:rebuilt(page, blocks, matched)
+local function rebuilt(page_record, blocks, matched)
 	local now, any = {}, false
 	for i = 1, #blocks do
 		local slot = matched[i]
@@ -242,10 +247,10 @@ function CniSessionMap:rebuilt(page, blocks, matched)
 		end
 	end
 
-	local before = self.landmarks[page.id]
+	local before = page_record.landmarks
 	if not before then
 		if any then
-			self.landmarks[page.id] = now
+			page_record.landmarks = now
 		end
 		return false
 	end
@@ -270,35 +275,30 @@ function CniSessionMap:rebuilt(page, blocks, matched)
 	return shared > 0 and agreed == 0
 end
 
---- Drops everything learned about a page whose elements are no longer the same
---- @private
---- @param page CniPage
-function CniSessionMap:forget(page)
-	for _, slot in ipairs(page.slots) do
-		if slot.controller then
-			self.known[slot.controller] = nil
-		end
-	end
-	for _, selector in ipairs(page.selectors) do
-		self.seen[selector.key] = nil
-	end
-end
-
 --- Takes in the page just matched, together with what the page proved about its fields
 --- @param page CniPage
 --- @param blocks CniBlock[]
 --- @param matched (CniSlot|nil)[] the slots as the matcher seated the blocks, before any variant was chosen
 --- @param states { [string]: boolean|string }? the states the page settled by itself
 function CniSessionMap:observe(page, blocks, matched, states)
-	if self:rebuilt(page, blocks, matched) then
-		self:forget(page)
+	local page_record = self.pages[page.id]
+	if not page_record then
+		page_record = { known = {}, seen = {}, landmarks = nil }
+		self.pages[page.id] = page_record
 	end
 
+	if rebuilt(page_record, blocks, matched) then
+		page_record.known = {}
+		page_record.seen = {}
+	end
+
+	local known = page_record.known
 	local drawn = drawn_fields(blocks, matched)
 	self.current = drawn
+	self.current_page = page_record
 
 	if states then
-		self:record(states, drawn)
+		record(known, states, drawn)
 	end
 
 	for _, selector in ipairs(page.selectors) do
@@ -306,15 +306,15 @@ function CniSessionMap:observe(page, blocks, matched, states)
 
 		-- a member merely missing from the screen looks exactly like one that held
 		if count == #selector.members then
-			local before = self.seen[selector.key]
+			local before = page_record.seen[selector.key]
 			if before then
-				self:compare(selector, before, members)
+				compare(known, selector, before, members)
 				-- the turn can settle the picture it came from as much as the one it arrived at
-				self:close(selector, before)
+				close(known, selector, before)
 			end
 
-			self.seen[selector.key] = members
-			self:close(selector, members)
+			page_record.seen[selector.key] = members
+			close(known, selector, members)
 		end
 	end
 end
@@ -324,10 +324,10 @@ end
 --- @return boolean?
 function CniSessionMap:lit(field)
 	local drawn = self.current[field]
-	if not drawn then
+	if not drawn or not self.current_page then
 		return nil
 	end
-	return self:is_lit(field, drawn)
+	return is_lit(self.current_page.known, field, drawn)
 end
 
 return CniSessionMap

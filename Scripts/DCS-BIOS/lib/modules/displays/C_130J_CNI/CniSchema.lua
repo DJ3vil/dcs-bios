@@ -328,10 +328,43 @@ local function stem_of(field)
 	return field:match("^(.+)_[^_]*$") or ""
 end
 
+--- Splits the positions sharing a stem into the groups drawn together: a rotary sits on one line,
+--- or wraps onto the next like ADF/MN/BTH. Positions further apart are separate decisions, like
+--- WPT SEQ and WP TRANS on the route page, which are both named route_*
+--- @param members string[]
+--- @param lines_of { [string]: { low: integer, high: integer } }
+--- @return { members: string[], low: integer, high: integer }[]
+local function line_groups(members, lines_of)
+	local ordered = {}
+	for i, member in ipairs(members) do
+		ordered[i] = member
+	end
+	table.sort(ordered, function(a, b)
+		if lines_of[a].low ~= lines_of[b].low then
+			return lines_of[a].low < lines_of[b].low
+		end
+		return a < b
+	end)
+
+	local groups = {}
+	local group = nil
+	for _, member in ipairs(ordered) do
+		local lines = lines_of[member]
+		if group and lines.low <= group.high + 1 then
+			group.members[#group.members + 1] = member
+			group.high = math.max(group.high, lines.high)
+		else
+			group = { members = { member }, low = lines.low, high = lines.high }
+			groups[#groups + 1] = group
+		end
+	end
+	return groups
+end
+
 --- The rotaries of a page. The module names their positions off a common stem, but a stem alone
 --- is not enough (uhf1_guard and uhf1_chan share one too): a rotary has at least three
---- highlightable positions, drawn within a couple of lines of each other. With only two
---- positions every switch moves both, which leaves nothing to reason from
+--- highlightable positions, drawn on one line or wrapped onto the next. With only two positions
+--- every switch moves both, which leaves nothing to reason from
 --- @param slots CniSlot[]
 --- @return CniSelector[]
 local function find_selectors(slots)
@@ -364,23 +397,33 @@ local function find_selectors(slots)
 	local found = {}
 	for _, stem in ipairs(stem_order) do
 		local members = stems[stem]
-		if #members >= 3 then
-			table.sort(members)
 
+		-- a position that is not on the grid could be the lit one without ever being seen
+		local lines_of, placed = {}, true
+		for _, member in ipairs(members) do
 			local low, high = nil, nil
-			for _, member in ipairs(members) do
-				for _, s in ipairs(fields[member].slots) do
-					if s.line ~= nil then
-						low = math.min(low or s.line, s.line)
-						high = math.max(high or s.line, s.line)
-					end
+			for _, s in ipairs(fields[member].slots) do
+				if s.line ~= nil then
+					low = math.min(low or s.line, s.line)
+					high = math.max(high or s.line, s.line)
 				end
 			end
+			if not low then
+				placed = false
+				break
+			end
+			lines_of[member] = { low = low, high = high }
+		end
 
-			-- ADF/MN/BTH straddles two lines because the module wraps it, anything wider is a
-			-- stem shared by coincidence
-			if low and high - low <= 2 then
-				found[#found + 1] = { key = stem, members = members }
+		if placed and #members >= 3 then
+			local groups = line_groups(members, lines_of)
+			for _, group in ipairs(groups) do
+				-- a group that still spans more than two lines is not one the module wraps
+				if #group.members >= 3 and group.high - group.low <= 1 then
+					table.sort(group.members)
+					local key = #groups == 1 and stem or (stem .. "@" .. group.low)
+					found[#found + 1] = { key = key, members = group.members }
+				end
 			end
 		end
 	end
