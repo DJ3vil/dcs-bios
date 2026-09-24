@@ -5,6 +5,7 @@ local ActionInput = require("Scripts.DCS-BIOS.lib.modules.documentation.ActionIn
 local AmuDisplay = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_AMU.AmuDisplay")
 local BIOSConfig = require("Scripts.DCS-BIOS.BIOSConfig")
 local CniDisplay = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniDisplay")
+local CockpitParamDump = require("Scripts.DCS-BIOS.lib.modules.displays.CockpitParamDump")
 local CommonPositions = require("Scripts.DCS-BIOS.lib.modules.CommonPositions")
 local Control = require("Scripts.DCS-BIOS.lib.modules.documentation.Control")
 local ControlAttributeDocumentation = require("Scripts.DCS-BIOS.lib.modules.documentation.ControlAttributeDocumentation")
@@ -2013,11 +2014,27 @@ C_130J:addExportHook(function(dev0)
 	cni_display:update(dev0)
 end)
 
--- what the other displays report, for working out how to export them
+-- what the other displays report, for working out how to export them, and the cockpit parameters
+-- next to the presses of the AMU keys, for finding out whether the AMU toggles are published there
 if BIOSConfig.c130j_cni_debug then
 	local indicator_dump = IndicatorDump:new({ file = lfs.writedir() .. [[Logs/DCS-BIOS-C-130J-Indicators.log]] })
-	C_130J:addExportHook(function()
+
+	local amu_keys = {}
+	for unit, first_arg in pairs({ LO_AMU = 133, LI_AMU = 141, RI_AMU = 174, RO_AMU = 182 }) do
+		for i = 1, 4 do
+			amu_keys[first_arg + i - 1] = unit .. "_L" .. i
+			amu_keys[first_arg + i + 3] = unit .. "_R" .. i
+		end
+	end
+	local param_dump = CockpitParamDump:new({
+		file = lfs.writedir() .. [[Logs/DCS-BIOS-C-130J-Params.log]],
+		keys = amu_keys,
+		devices = { [devices.AMU001] = "AMU001", [devices.AMU002] = "AMU002", [devices.AMU003] = "AMU003", [devices.AMU004] = "AMU004" },
+	})
+
+	C_130J:addExportHook(function(dev0)
 		indicator_dump:update()
+		param_dump:update(dev0)
 	end)
 end
 

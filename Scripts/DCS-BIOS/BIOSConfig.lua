@@ -16,7 +16,7 @@ module("BIOSConfig", package.seeall)
 --- @field dev_mode boolean whether dev mode is enabled and json/header files should be written
 --- @field clean_logs boolean whether duplicate log messages should be removed
 --- @field export_rate number export count by second (may vary depending on DCS frame rate), supported range: [1;30]
---- @field c130j_cni_debug boolean? whether every rendered C-130J CNI-MU page should be written to Logs/DCS-BIOS-C-130J-CNI.log, and what the other displays report to Logs/DCS-BIOS-C-130J-Indicators.log
+--- @field c130j_cni_debug boolean? whether every rendered C-130J CNI-MU page should be written to Logs/DCS-BIOS-C-130J-CNI.log, what the other displays report to Logs/DCS-BIOS-C-130J-Indicators.log, and the cockpit parameters with the AMU key presses to Logs/DCS-BIOS-C-130J-Params.log
 --- @field version string the current dcs-bios version
 local BIOSConfig = {
 	tcp_config = {

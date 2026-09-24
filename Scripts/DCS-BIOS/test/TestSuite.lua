@@ -4,6 +4,7 @@ require("Scripts.DCS-BIOS.test.AircraftTest") -- high-level tests for specific a
 require("Scripts.DCS-BIOS.test.C130JAmuTest") -- unit tests for the C-130J AMU displays
 require("Scripts.DCS-BIOS.test.C130JCniTest") -- unit tests for the C-130J CNI-MU displays
 require("Scripts.DCS-BIOS.test.C130JCniSessionTest") -- unit tests for the highlights learned during a session
+require("Scripts.DCS-BIOS.test.CockpitParamDumpTest") -- unit tests for the cockpit parameter troubleshooting log
 require("Scripts.DCS-BIOS.test.ConnectionManagerTest") -- unit tests for send/receive logic
 require("Scripts.DCS-BIOS.test.F15EUfcTest") -- unit tests for the F-15E UFC lines
 require("Scripts.DCS-BIOS.test.IndicatorDumpTest") -- unit tests for the indicator troubleshooting log
