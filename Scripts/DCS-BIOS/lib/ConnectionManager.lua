@@ -27,11 +27,74 @@ function ConnectionManager:addConnection(server)
 	table.insert(self.connections, server)
 end
 
---- Queues a message to be sent to any connections
+local function read_u16(s, pos)
+	return s:byte(pos) + s:byte(pos + 1) * 256
+end
+
+local function encode_u16(value)
+	return string.char(value % 256, math.floor(value / 256) % 256)
+end
+
+--- Splits a sequence of write accesses (address, length and data) into pieces of at most
+--- max_size bytes. A write access that does not fit is split into several consecutive ones.
+--- @param msg string
+--- @param max_size integer
+--- @return string[]? pieces nil if the message is not a sequence of write accesses
+local function split_write_accesses(msg, max_size)
+	local pieces = {}
+	local current, current_size = {}, 0
+
+	local function finish_piece()
+		if current_size > 0 then
+			pieces[#pieces + 1] = table.concat(current)
+			current, current_size = {}, 0
+		end
+	end
+
+	local pos = 1
+	while pos <= #msg do
+		if pos + 3 > #msg then
+			return nil
+		end
+		local address = read_u16(msg, pos)
+		local length = read_u16(msg, pos + 2)
+		if length == 0 or length % 2 ~= 0 or pos + 3 + length > #msg then
+			return nil
+		end
+
+		local offset = 0
+		while offset < length do
+			local room = max_size - current_size - 4
+			if room < 2 then
+				finish_piece()
+				room = max_size - 4
+			end
+			local size = math.min(length - offset, room - room % 2)
+			current[#current + 1] = encode_u16(address + offset) .. encode_u16(size) .. msg:sub(pos + 4 + offset, pos + 3 + offset + size)
+			current_size = current_size + 4 + size
+			offset = offset + size
+		end
+
+		pos = pos + 4 + length
+	end
+
+	finish_piece()
+	return pieces
+end
+
+--- Queues a message to be sent to any connections. A message of write accesses that exceeds the
+--- maximum payload size is split into several messages.
 ---@param msg string the message to send
 function ConnectionManager:queue(msg)
 	if msg:len() > self.MAX_PAYLOAD_SIZE then
-		error(string.format("Message (%d) exceeded max buffer size (%d) :: %s", msg:len(), self.MAX_PAYLOAD_SIZE, msg))
+		local pieces = split_write_accesses(msg, self.MAX_PAYLOAD_SIZE)
+		if not pieces then
+			error(string.format("Message (%d) exceeded max buffer size (%d) :: %s", msg:len(), self.MAX_PAYLOAD_SIZE, msg))
+		end
+		for _, piece in ipairs(pieces) do
+			table.insert(self.msg_buf, piece)
+		end
+		return
 	end
 
 	table.insert(self.msg_buf, msg)
