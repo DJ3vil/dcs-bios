@@ -49,6 +49,31 @@ end
 
 local function noop() end
 
+-- every page script loads the same shared files, so each file is compiled only once
+local compiled = {}
+
+--- @param path string
+--- @return function? chunk
+--- @return string? error
+local function compile(path)
+	local key = norm(path)
+	local chunk = compiled[key]
+	if chunk == nil then
+		local err
+		chunk, err = loadfile(key)
+		if not chunk then
+			return nil, err
+		end
+		compiled[key] = chunk
+	end
+	return chunk
+end
+
+--- Releases the compiled scripts once all pages have been read
+function CniSchemaExtractor.clear_cache()
+	compiled = {}
+end
+
 --- Builds the sandbox a page script runs in
 --- @param recorder table receives every element the script Add()s
 --- @param script_path string
@@ -177,7 +202,7 @@ local function new_env(recorder, script_path, common_path)
 		if SKIP[basename(path)] then
 			return
 		end
-		local chunk, err = loadfile(norm(path))
+		local chunk, err = compile(path)
 		if not chunk then
 			error("dofile " .. tostring(path) .. ": " .. tostring(err), 0)
 		end
@@ -212,7 +237,7 @@ local function new_env(recorder, script_path, common_path)
 	end
 
 	base.loadfile = function(path)
-		local chunk = loadfile(norm(path))
+		local chunk = compile(path)
 		if chunk then
 			setfenv(chunk, base)
 		end
@@ -227,7 +252,7 @@ end
 --- @return boolean? ok
 --- @return string? error
 local function run_file(path, env)
-	local chunk, err = loadfile(norm(path))
+	local chunk, err = compile(path)
 	if not chunk then
 		return nil, "load: " .. tostring(err)
 	end

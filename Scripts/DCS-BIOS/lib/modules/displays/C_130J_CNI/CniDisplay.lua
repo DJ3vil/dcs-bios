@@ -88,6 +88,8 @@ function CniDisplay:new(options)
 		schema_state = "pending",
 		loader = nil,
 		load_deadline = 0,
+		load_started = 0,
+		load_work = 0,
 		resolver = nil,
 
 		exec_presses = 0,
@@ -214,21 +216,28 @@ function CniDisplay:load_schema()
 		return
 	end
 
+	local slice_start = os.clock()
 	if not self.loader then
+		self.load_started = slice_start
 		self.loader = coroutine.create(function()
 			return self:build_resolver()
 		end)
 	end
 
-	self.load_deadline = os.clock() + LOAD_BUDGET
-	local ok, result = coroutine.resume(self.loader)
+	self.load_deadline = slice_start + LOAD_BUDGET
+	local ok, result, summary = coroutine.resume(self.loader)
+	local now = os.clock()
+	self.load_work = self.load_work + (now - slice_start)
+
 	if not ok then
 		self.schema_state = "failed"
+		CniSchemaExtractor.clear_cache()
 		self:log_error_once("unable to read the page layouts: " .. tostring(result))
 		self:show_message("CNI LAYOUT UNAVAILABLE", "SEE DCS-BIOS.LOG")
 	elseif coroutine.status(self.loader) == "dead" then
 		self.resolver = result
 		self.schema_state = "ready"
+		Log:log_info(string.format("C-130J CNI-MU: %s in %.0f ms, spread over %.1f s", summary, self.load_work * 1000, now - self.load_started))
 	end
 end
 
@@ -241,8 +250,8 @@ end
 
 --- @private
 --- @return CniPageResolver
+--- @return string summary
 function CniDisplay:build_resolver()
-	local started = os.clock()
 	local raw_pages
 	local source = "test data"
 
@@ -260,6 +269,7 @@ function CniDisplay:build_resolver()
 			raw_pages[#raw_pages + 1] = CniSchemaExtractor.extract_page(script_path, common_path, entry)
 			self:yield_if_due()
 		end
+		CniSchemaExtractor.clear_cache()
 	end
 
 	local pages, partial = {}, 0
@@ -276,8 +286,7 @@ function CniDisplay:build_resolver()
 		error("no pages found in " .. source, 0)
 	end
 
-	Log:log_info(string.format("C-130J CNI-MU: read %d page layouts (%d partial) from %s in %.0f ms of work", #pages, partial, source, (os.clock() - started) * 1000))
-	return CniPageResolver:new(pages)
+	return CniPageResolver:new(pages), string.format("read %d page layouts (%d partial) from %s", #pages, partial, source)
 end
 
 --- Writes a message onto every display, for problems the crew would otherwise only see as a
