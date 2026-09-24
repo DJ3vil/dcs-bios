@@ -14,6 +14,7 @@ local CniIndication = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.
 local CniPageResolver = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniPageResolver")
 local CniSchema = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniSchema")
 local CniSchemaExtractor = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniSchemaExtractor")
+local CniSessionMap = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniSessionMap")
 local CniVariants = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniVariants")
 local Log = require("Scripts.DCS-BIOS.lib.common.Log")
 
@@ -79,6 +80,7 @@ function CniDisplay:new(options)
 		exec_lamps = {},
 		lamps = {},
 		seats = {},
+		sessions = {},
 
 		tick = 0,
 		first_indicator = DEFAULT_FIRST_INDICATOR,
@@ -113,6 +115,8 @@ function CniDisplay:new(options)
 		o.exec_lamps[seat] = false
 		o.lamps[seat] = CniExecLamp:new()
 		o.seats[seat] = { raw = nil, title = nil, dirty = false }
+		-- every CNI-MU draws with elements of its own
+		o.sessions[seat] = CniSessionMap:new()
 		for line = 1, CniGrid.LINES do
 			o.lines[seat][line] = BLANK_LINE
 			o.formats[seat][line] = BLANK_FORMAT
@@ -495,7 +499,7 @@ function CniDisplay:render_seat(seat, indicator, raw, changed)
 	end
 
 	local matched = CniBlockMatcher.align(flat, page.slots)
-	CniVariants.apply(matched, page, flat, self.radios, self.ship_solution)
+	CniVariants.apply(matched, page, flat, self.radios, self.ship_solution, self.sessions[seat])
 	local lines, formats = CniGrid.render(flat, matched)
 
 	self.lines[seat] = lines

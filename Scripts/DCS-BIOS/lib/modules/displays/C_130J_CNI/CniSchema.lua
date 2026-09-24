@@ -48,6 +48,10 @@ local CniFormat = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniF
 --- @field two_state boolean whether the field is built in two states
 --- @field column string? the table column the slot belongs to
 
+--- @class CniSelector a rotary: fields of one page of which exactly one is selected
+--- @field key string the stem the member fields are named off, e.g. power_up_align
+--- @field members string[] the member fields, sorted
+
 --- @class CniPage
 --- @field id integer
 --- @field name string
@@ -56,6 +60,7 @@ local CniFormat = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniF
 --- @field counter string?
 --- @field slots CniSlot[] in indication order
 --- @field landmarks string[] distinct static values
+--- @field selectors CniSelector[]
 
 --- @class CniSchema
 local CniSchema = {}
@@ -315,6 +320,73 @@ local function resolve_variants(slots)
 	end
 end
 
+--- The name a field shares with the other positions of its rotary, e.g. power_up_align of
+--- power_up_align_gps
+--- @param field string
+--- @return string
+local function stem_of(field)
+	return field:match("^(.+)_[^_]*$") or ""
+end
+
+--- The rotaries of a page. The module names their positions off a common stem, but a stem alone
+--- is not enough (uhf1_guard and uhf1_chan share one too): a rotary has at least three
+--- highlightable positions, drawn within a couple of lines of each other. With only two
+--- positions every switch moves both, which leaves nothing to reason from
+--- @param slots CniSlot[]
+--- @return CniSelector[]
+local function find_selectors(slots)
+	local fields, field_order = {}, {}
+	for _, s in ipairs(slots) do
+		if s.controller and s.two_state then
+			local field = fields[s.controller]
+			if not field then
+				field = { slots = {}, invert = false }
+				fields[s.controller] = field
+				field_order[#field_order + 1] = s.controller
+			end
+			field.slots[#field.slots + 1] = s
+			field.invert = field.invert or s.invert
+		end
+	end
+
+	local stems, stem_order = {}, {}
+	for _, name in ipairs(field_order) do
+		local stem = stem_of(name)
+		if fields[name].invert and stem ~= "" then
+			if not stems[stem] then
+				stems[stem] = {}
+				stem_order[#stem_order + 1] = stem
+			end
+			table.insert(stems[stem], name)
+		end
+	end
+
+	local found = {}
+	for _, stem in ipairs(stem_order) do
+		local members = stems[stem]
+		if #members >= 3 then
+			table.sort(members)
+
+			local low, high = nil, nil
+			for _, member in ipairs(members) do
+				for _, s in ipairs(fields[member].slots) do
+					if s.line ~= nil then
+						low = math.min(low or s.line, s.line)
+						high = math.max(high or s.line, s.line)
+					end
+				end
+			end
+
+			-- ADF/MN/BTH straddles two lines because the module wraps it, anything wider is a
+			-- stem shared by coincidence
+			if low and high - low <= 2 then
+				found[#found + 1] = { key = stem, members = members }
+			end
+		end
+	end
+	return found
+end
+
 --- Prepares one page recorded by the extractor
 --- @param raw CniRawPage
 --- @return CniPage
@@ -410,6 +482,7 @@ function CniSchema.prepare_page(raw)
 		counter = counter,
 		slots = slots,
 		landmarks = landmarks,
+		selectors = find_selectors(slots),
 	}
 end
 

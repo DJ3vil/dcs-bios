@@ -3,8 +3,9 @@ module("CniVariants", package.seeall)
 -- Works out which state each toggleable field of a page is in and swaps every matched element
 -- to the variant that matches. The indication carries no highlight, so a state is only known
 -- where the page gives itself away (an element built for one state only was drawn, the two
--- forms spell different text, a radio's power or the INAV solution settles it). A field without
--- evidence is drawn in the form that claims the least.
+-- forms spell different text, a radio's power or the INAV solution settles it) or where the
+-- session map learned it earlier in the session. A field without evidence is drawn in the form
+-- that claims the least.
 -- Lua port of CniVariants.cs, CniRadios.cs and CniShipSolution.cs of WCtrlDcsBiosBridge, see
 -- LICENSE-WCtrlDcsBiosBridge.txt.
 
@@ -218,17 +219,43 @@ local function neutral(slot, other)
 	return other
 end
 
+--- What the elements on screen were shown to be earlier in the session, for the fields the page
+--- does not settle by itself this frame
+--- @param states { [string]: boolean|string }
+--- @param matched (CniSlot|nil)[]
+--- @param count integer
+--- @param session CniSessionMap
+local function observe_session(states, matched, count, session)
+	for i = 1, count do
+		local field = matched[i] and matched[i].controller
+		if field and states[field] == nil then
+			local lit = session:lit(field)
+			if lit ~= nil then
+				states[field] = lit
+			end
+		end
+	end
+end
+
 --- Rewrites matched in place, one entry per block
 --- @param matched (CniSlot|nil)[]
 --- @param page CniPage
 --- @param blocks CniBlock[]
 --- @param radios CniRadio[]?
 --- @param ship_solution integer?
-function CniVariants.apply(matched, page, blocks, radios, ship_solution)
+--- @param session CniSessionMap? what was learned about the elements of this display so far
+function CniVariants.apply(matched, page, blocks, radios, ship_solution, session)
 	local count = #blocks
 	local states = observe(matched, count)
 	observe_absences(states, matched, count, page)
 	observe_radios(states, matched, blocks, radios)
+
+	if session then
+		-- everything settled above is as much a reading of the element that carried it as of the
+		-- state, and the element is still there on the frames where the reading is not
+		session:observe(page, blocks, matched, states)
+		observe_session(states, matched, count, session)
+	end
 
 	for i = 1, count do
 		local slot = matched[i]
