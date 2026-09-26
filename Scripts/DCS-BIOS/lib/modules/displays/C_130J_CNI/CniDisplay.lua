@@ -28,6 +28,7 @@ local Log = require("Scripts.DCS-BIOS.lib.common.Log")
 --- @field get_device (fun(id: integer): table?)?
 --- @field load_pages (fun(): CniRawPage[])? source of the page layouts, instead of the module's scripts
 --- @field debug_file string? file to write every rendered page to, for troubleshooting
+--- @field defaults HighlightDefaults? where the positions the crew said toggles start in are kept
 
 --- @class CniDisplay
 local CniDisplay = {}
@@ -73,10 +74,12 @@ function CniDisplay:new(options)
 		load_pages = options.load_pages,
 		debug_file = options.debug_file,
 		debug_entries = 0,
+		defaults = options.defaults,
 
 		lines = {},
 		formats = {},
 		page_names = {},
+		pages = {},
 		exec_lamps = {},
 		lamps = {},
 		seats = {},
@@ -116,7 +119,7 @@ function CniDisplay:new(options)
 		o.lamps[seat] = CniExecLamp:new()
 		o.seats[seat] = { raw = nil, title = nil, dirty = false }
 		-- every CNI-MU draws with elements of its own
-		o.sessions[seat] = CniSessionMap:new()
+		o.sessions[seat] = CniSessionMap:new(nil, o.defaults and o.defaults:section("cni"))
 		for line = 1, CniGrid.LINES do
 			o.lines[seat][line] = BLANK_LINE
 			o.formats[seat][line] = BLANK_FORMAT
@@ -160,6 +163,31 @@ end
 --- @param toggle string
 function CniDisplay:swap_starting_state(seat, toggle)
 	self.sessions[seat]:swap(toggle)
+	self.seats[seat].dirty = true
+end
+
+--- Moves the highlight of the toggle beside a line select key on to its next position, for a
+--- display that shows it wrong or not at all. Only the exported display changes, not the
+--- aircraft; every switch from then on is followed. Said of a toggle still as it was first seen,
+--- the position is also kept as the one it starts in.
+--- @param seat integer 1 = pilot, 2 = copilot, 3 = augmented crew
+--- @param key integer 1-6 for L1-L6, 7-12 for R1-R6
+function CniDisplay:shift_highlight(seat, key)
+	local page = self.pages[seat]
+	if not page or key < 1 or key > 12 then
+		return
+	end
+
+	local session = self.sessions[seat]
+	local toggle = session:toggle_at(page, (key - 1) % 6 + 1, key <= 6 and "L" or "R")
+	if not toggle then
+		return
+	end
+
+	local fields, unchanged = session:shift(page, toggle)
+	if fields and unchanged and self.defaults then
+		self.defaults:remember("cni", page.name, toggle.key, fields)
+	end
 	self.seats[seat].dirty = true
 end
 
@@ -451,6 +479,7 @@ function CniDisplay:blank(seat)
 		self.formats[seat][line] = BLANK_FORMAT
 	end
 	self.page_names[seat] = ""
+	self.pages[seat] = nil
 end
 
 --- @private
@@ -498,6 +527,7 @@ function CniDisplay:render_seat(seat, indicator, raw, changed)
 	if not page then
 		-- an unknown page keeps what is on screen rather than being drawn with a wrong layout
 		self.page_names[seat] = ""
+		self.pages[seat] = nil
 		self:write_debug(seat, indicator, raw, title, nil)
 		return
 	end
@@ -514,6 +544,7 @@ function CniDisplay:render_seat(seat, indicator, raw, changed)
 	self.lines[seat] = lines
 	self.formats[seat] = formats
 	self.page_names[seat] = page.name
+	self.pages[seat] = page
 	self:write_debug(seat, indicator, raw, title, page.name)
 end
 

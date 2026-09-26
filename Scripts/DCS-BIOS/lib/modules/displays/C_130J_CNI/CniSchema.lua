@@ -52,6 +52,14 @@ local CniFormat = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniF
 --- @field key string the stem the member fields are named off, e.g. power_up_align
 --- @field members string[] the member fields, sorted
 
+--- @class CniToggle what one line select key switches: its positions, of which exactly one is lit,
+--- or a lone field switching between its two forms
+--- @field key string the key and the stem of the fields, e.g. 4R:route; the same in every session
+--- @field row integer 1-6, the line select key beside it
+--- @field side string L or R
+--- @field members string[] the fields in reading order
+--- @field edge integer columns between its text and the key's edge of the screen
+
 --- @class CniPage
 --- @field id integer
 --- @field name string
@@ -61,6 +69,7 @@ local CniFormat = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniF
 --- @field slots CniSlot[] in indication order
 --- @field landmarks string[] distinct static values
 --- @field selectors CniSelector[]
+--- @field toggles CniToggle[]
 
 --- @class CniSchema
 local CniSchema = {}
@@ -430,10 +439,85 @@ local function find_selectors(slots)
 	return found
 end
 
+--- The line select key beside a line: each key has its large line and the small label above it
+--- @param line integer
+--- @return integer?
+local function key_row(line)
+	if line < 1 or line > 12 then
+		return nil
+	end
+	return math.floor((line + 1) / 2)
+end
+
+--- The toggles of a page, each tied to the line select key beside it. The positions of one
+--- toggle are named off a common stem and sit beside the same key, like WPT SEQ's AUTO and MAN;
+--- a field that is not one position of several switches between its own two forms, like IFF's
+--- OFF/ON, which the module builds as two copies of both words
+--- @param slots CniSlot[]
+--- @param columns integer
+--- @return CniToggle[]
+local function find_toggles(slots, columns)
+	local fields, field_order = {}, {}
+	for _, s in ipairs(slots) do
+		if s.controller and s.two_state and CniSchema.is_placeable(s) then
+			local field = fields[s.controller]
+			if not field then
+				field = { low = s.line, first_col = s.col, last_col = s.col, left = 0, right = 0 }
+				fields[s.controller] = field
+				field_order[#field_order + 1] = s.controller
+			end
+			field.low = math.min(field.low, s.line)
+			field.first_col = math.min(field.first_col, s.col)
+			field.last_col = math.max(field.last_col, s.col)
+			local left = s.anchor == CniSchema.ANCHOR_LEFT or (s.anchor == CniSchema.ANCHOR_CENTER and s.col < columns / 2)
+			if left then
+				field.left = field.left + 1
+			else
+				field.right = field.right + 1
+			end
+		end
+	end
+
+	local toggles, by_key = {}, {}
+	for _, name in ipairs(field_order) do
+		local field = fields[name]
+		local row = key_row(field.low)
+		if row then
+			local side = field.left >= field.right and "L" or "R"
+			local stem = stem_of(name)
+			local key = row .. side .. ":" .. (stem ~= "" and stem or name)
+			local toggle = by_key[key]
+			if not toggle then
+				toggle = { key = key, row = row, side = side, members = {}, edge = columns }
+				by_key[key] = toggle
+				toggles[#toggles + 1] = toggle
+			end
+			table.insert(toggle.members, name)
+			local edge = side == "L" and field.first_col or (columns - field.last_col)
+			toggle.edge = math.min(toggle.edge, edge)
+		end
+	end
+
+	for _, toggle in ipairs(toggles) do
+		table.sort(toggle.members, function(a, b)
+			local fa, fb = fields[a], fields[b]
+			if fa.low ~= fb.low then
+				return fa.low < fb.low
+			end
+			if fa.first_col ~= fb.first_col then
+				return fa.first_col < fb.first_col
+			end
+			return a < b
+		end)
+	end
+	return toggles
+end
+
 --- Prepares one page recorded by the extractor
 --- @param raw CniRawPage
+--- @param columns integer? the width of the display, 25 for the CNI-MU
 --- @return CniPage
-function CniSchema.prepare_page(raw)
+function CniSchema.prepare_page(raw, columns)
 	local title, title_sources, counter = nil, nil, nil
 	for _, s in ipairs(raw.slots) do
 		if s.name == "cni_title" then
@@ -526,6 +610,7 @@ function CniSchema.prepare_page(raw)
 		slots = slots,
 		landmarks = landmarks,
 		selectors = find_selectors(slots),
+		toggles = find_toggles(slots, columns or 25),
 	}
 end
 

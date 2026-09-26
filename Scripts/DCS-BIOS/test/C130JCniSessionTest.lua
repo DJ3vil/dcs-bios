@@ -528,3 +528,218 @@ function TestC130JCniSession:testModuleOffersTheSwapForEverySeat()
 		swap("TOGGLE")
 	end
 end
+
+-- a lone field switching between its two forms, like TACAN's REC
+local TACAN = {
+	id = 5,
+	name = "TACAN1",
+	slots = {
+		slot(1, { name = "cni_title", value = "TACAN 1", anchor = "Center", line = 0, col = 13 }),
+		slot(2, { value = "MODE ", line = 3, col = 25, anchor = "Right", small = true }),
+		slot(3, { ctrl = "tac1_rec_on", value = "REC", line = 4, col = 25, anchor = "Right", invert = true }),
+		slot(4, { ctrl = "tac1_rec_off", value = "REC", line = 4, col = 25, anchor = "Right" }),
+		slot(5, { value = "<INDEX", line = 12, col = 0 }),
+		slot(6, { name = "cni_scratchpad", ctrl = "scratch", fmt = { "%s" }, line = 13, col = 0 }),
+	},
+}
+
+--- TACAN 1 with REC drawn by the given element
+local function tacan(element)
+	return indication({
+		{ "cni_title", "TACAN 1" },
+		{ "{MODE}", "MODE " },
+		{ element, "REC" },
+		{ "{INDEX}", "<INDEX" },
+		{ "cni_scratchpad", "" },
+	})
+end
+
+--- @param page CniPage
+--- @param key string
+--- @return CniToggle?
+local function toggle_named(page, key)
+	for _, toggle in ipairs(page.toggles) do
+		if toggle.key == key then
+			return toggle
+		end
+	end
+	return nil
+end
+
+function TestC130JCniSession:testTogglesAreTiedToTheKeyBesideThem()
+	local keys = {}
+	for _, raw in ipairs({ ROUTE, POWER_UP, COMM_TUNE_U1, TACAN }) do
+		for _, toggle in ipairs(CniSchema.prepare_page(raw).toggles) do
+			keys[#keys + 1] = toggle.key .. " " .. table.concat(toggle.members, ",")
+		end
+	end
+	lu.assertEquals(keys, {
+		-- the positions in reading order
+		"4R:route route_man,route_auto",
+		"5R:route route_cp,route_nom,route_pp",
+		"5L:power_up_align power_up_align_gps,power_up_align_last,power_up_align_ref",
+		"1R:uhf1_power uhf1_power_off,uhf1_power_on",
+		-- a rotary wrapping from the label line onto the key's own
+		"3R:uhf1_adf uhf1_adf_adf,uhf1_adf_mn,uhf1_adf_bth",
+		"2R:tac1 tac1_rec",
+	})
+end
+
+function TestC130JCniSession:testShiftSetsATogglePositionAndSwitchesAreFollowed()
+	local page = CniSchema.prepare_page(ROUTE)
+	-- without the starting state WPT SEQ is taken to be in, so nothing is known of it
+	local map = CniSessionMap:new({})
+	local toggle = toggle_named(page, "4R:route")
+
+	lu.assertNil(wpt_seq(map, page, "AUTO"))
+
+	-- the crew says: the first position, then the next
+	map:shift(page, toggle)
+	lu.assertEquals(wpt_seq(map, page, "AUTO"), "MAN")
+	map:shift(page, toggle)
+	lu.assertEquals(wpt_seq(map, page, "AUTO"), "AUTO")
+
+	-- every switch in the aircraft is followed from there
+	lu.assertEquals(wpt_seq(map, page, "MAN"), "MAN")
+	lu.assertEquals(wpt_seq(map, page, "AUTO", "ROT"), "AUTO")
+end
+
+function TestC130JCniSession:testShiftTurnsALoneFieldOver()
+	local page = CniSchema.prepare_page(TACAN)
+	local map = CniSessionMap:new({})
+	local toggle = toggle_named(page, "2R:tac1")
+
+	lu.assertNil(lit_word(map, page, tacan("{REC-A}")))
+	map:shift(page, toggle)
+	lu.assertEquals(lit_word(map, page, tacan("{REC-A}")), "REC")
+
+	-- the aircraft switches it: the other form is drawn, and that one is the plain one
+	lu.assertNil(lit_word(map, page, tacan("{REC-B}")))
+	lu.assertEquals(lit_word(map, page, tacan("{REC-A}")), "REC")
+
+	map:shift(page, toggle)
+	lu.assertNil(lit_word(map, page, tacan("{REC-A}")))
+end
+
+--- A CNI-MU display reading the given pages, with the indications and defaults given
+local function new_display(pages, indications, defaults)
+	return CniDisplay:new({
+		list_indication = function(id)
+			return indications[id] or ""
+		end,
+		get_device = function()
+			return nil
+		end,
+		load_pages = function()
+			return pages
+		end,
+		defaults = defaults,
+	})
+end
+
+local function run(display, ticks)
+	for _ = 1, ticks do
+		display:update(nil)
+	end
+end
+
+--- The WP TRANS words drawn lit on the pilot's route page (line 11: CP, ROT, P-P)
+local function wp_trans(display)
+	local line, format = display:get_line(1, 11), display:get_format(1, 11)
+	local lit = {}
+	for start, word, stop in line:gmatch("()([%u%-]+)()") do
+		if format:sub(start, stop - 1):match("^[23]+$") then
+			lit[#lit + 1] = word
+		end
+	end
+	return table.concat(lit, ",")
+end
+
+function TestC130JCniSession:testCorrectionIsKeptAsWhereTheToggleStarts()
+	local HighlightDefaults = require("Scripts.DCS-BIOS.lib.modules.displays.HighlightDefaults")
+	local defaults = HighlightDefaults:new()
+	local indications = { [8] = route("AUTO", "ROT") }
+
+	local display = new_display({ ROUTE }, indications, defaults)
+	run(display, 30)
+	lu.assertEquals(display:get_line(1, 11), "<DEP/ARR       CP/ROT/P-P")
+	lu.assertEquals(wp_trans(display), "")
+
+	-- R5: CP first, then ROT, which is where the aircraft is
+	display:shift_highlight(1, 11)
+	run(display, 6)
+	lu.assertEquals(wp_trans(display), "CP")
+	display:shift_highlight(1, 11)
+	run(display, 6)
+	lu.assertEquals(wp_trans(display), "ROT")
+
+	-- nothing had switched it yet, so that is where it starts
+	lu.assertEquals(defaults:section("cni").ROUTE_GEN["5R:route"], { route_cp = false, route_nom = true, route_pp = false })
+
+	-- the next session takes it to start there, and follows it from there
+	local next_session = new_display({ ROUTE }, indications, defaults)
+	run(next_session, 30)
+	lu.assertEquals(wp_trans(next_session), "ROT")
+	indications[8] = route("AUTO", "CP")
+	run(next_session, 6)
+	lu.assertEquals(wp_trans(next_session), "CP")
+
+	-- said after a switch, a position is no longer the one it starts in
+	next_session:shift_highlight(1, 11)
+	run(next_session, 6)
+	lu.assertEquals(wp_trans(next_session), "ROT")
+	lu.assertEquals(defaults:section("cni").ROUTE_GEN["5R:route"], { route_cp = false, route_nom = true, route_pp = false })
+
+	-- a key with no toggle beside it changes nothing
+	next_session:shift_highlight(1, 1)
+	next_session:shift_highlight(1, 99)
+	run(next_session, 6)
+	lu.assertEquals(wp_trans(next_session), "ROT")
+end
+
+function TestC130JCniSession:testRememberedStartComesBeforeTheBuiltInOne()
+	local HighlightDefaults = require("Scripts.DCS-BIOS.lib.modules.displays.HighlightDefaults")
+	local defaults = HighlightDefaults:new()
+	defaults:remember("cni", "ROUTE_GEN", "4R:route", { route_man = true, route_auto = false })
+
+	local display = new_display({ ROUTE }, { [8] = route("MAN", "P-P") }, defaults)
+	run(display, 30)
+	-- line 9 holds WPT SEQ: MAN in columns 17-19, AUTO in columns 22-25
+	local format = display:get_format(1, 9)
+	lu.assertEquals(format:sub(18, 20) .. " " .. format:sub(22, 25), "222 1111")
+end
+
+function TestC130JCniSession:testDefaultsAreKeptInAFile()
+	local HighlightDefaults = require("Scripts.DCS-BIOS.lib.modules.displays.HighlightDefaults")
+	local path = os.tmpname()
+
+	local defaults = HighlightDefaults:new({ file = path })
+	defaults:remember("cni", "ROUTE_GEN", "5R:route", { route_cp = false, route_nom = true, route_pp = false })
+	defaults:remember("amu_lo", "PFD", "2", 2)
+
+	local again = HighlightDefaults:new({ file = path })
+	lu.assertEquals(again:section("cni"), { ROUTE_GEN = { ["5R:route"] = { route_cp = false, route_nom = true, route_pp = false } } })
+	lu.assertEquals(again:section("amu_lo"), { PFD = { ["2"] = 2 } })
+
+	-- a file that is not a table of defaults, or tries to call anything, is left alone
+	for _, text in ipairs({ "return 42", "not lua at all {", "return { cni = os.exit() }" }) do
+		local file = io.open(path, "w")
+		lu.assertNotNil(file)
+		if file then
+			file:write(text)
+			file:close()
+		end
+		lu.assertEquals(HighlightDefaults:new({ file = path }):section("cni"), {})
+	end
+	os.remove(path)
+end
+
+function TestC130JCniSession:testModuleOffersTheCorrectionForEverySeat()
+	local C_130J = require("Scripts.DCS-BIOS.lib.modules.aircraft_modules.C-130J")
+	for _, prefix in ipairs({ "PLT", "CPLT", "AUG" }) do
+		local shift = C_130J.inputProcessors[prefix .. "_CNI_SHIFT_HIGHLIGHT"]
+		lu.assertNotNil(shift, prefix)
+		shift("7")
+		shift("not a key")
+	end
+end

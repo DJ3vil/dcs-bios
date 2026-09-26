@@ -23,6 +23,11 @@ module("CniSessionMap", package.seeall)
 -- that always start in the same position are taken to be in it the first time they are seen,
 -- and every switch is followed from there. Should an aircraft start otherwise, swap() turns the
 -- assumption around.
+--
+-- The crew can also say which position a toggle is in (shift()), without touching the aircraft.
+-- That, too, is written down against the elements on screen, so every later switch is followed
+-- from there; and said of a toggle still in the position it was first seen in, it is what the
+-- toggle starts in, which the caller can keep as a default for later sessions (defaults).
 -- Lua port of CniSessionMap.cs of WCtrlDcsBiosBridge, see LICENSE-WCtrlDcsBiosBridge.txt.
 
 --- @class CniSessionPage what is known about the elements of one page
@@ -30,6 +35,7 @@ module("CniSessionMap", package.seeall)
 --- @field known { [string]: { [string]: boolean } } per field, whether each of its elements is the lit one
 --- @field seen { [string]: { [string]: string } } per rotary, the elements last drawn for each member
 --- @field landmarks { [integer]: string }? the elements behind the page's fixed text, by slot
+--- @field first { [string]: string } per toggle, the elements it was first seen with
 
 --- @class CniStartingState a toggle that always starts in the same position
 --- @field page string the page drawing it
@@ -41,6 +47,7 @@ module("CniSessionMap", package.seeall)
 --- @field private current_page CniSessionPage? the page last observed
 --- @field private starting { [string]: CniStartingState }
 --- @field private swap_pending { [string]: boolean } toggles to take the other way round when first seen
+--- @field private defaults { [string]: { [string]: { [string]: boolean } } } per page and toggle, the position it starts in
 local CniSessionMap = {}
 
 --- @type { [string]: CniStartingState }
@@ -50,14 +57,16 @@ CniSessionMap.STARTING_STATES = {
 }
 
 --- @param starting_states { [string]: CniStartingState }? defaults to STARTING_STATES
+--- @param defaults { [string]: { [string]: { [string]: boolean } } }? per page name and toggle key, whether each field is lit in the position the toggle starts in; read whenever a toggle is first seen, so it can grow while the session runs
 --- @return CniSessionMap
-function CniSessionMap:new(starting_states)
+function CniSessionMap:new(starting_states, defaults)
 	local o = {
 		pages = {},
 		current = {},
 		current_page = nil,
 		starting = starting_states or CniSessionMap.STARTING_STATES,
 		swap_pending = {},
+		defaults = defaults or {},
 	}
 	setmetatable(o, self)
 	self.__index = self
@@ -304,13 +313,14 @@ end
 function CniSessionMap:observe(page, blocks, matched, states)
 	local page_record = self.pages[page.id]
 	if not page_record then
-		page_record = { name = page.name, known = {}, seen = {}, landmarks = nil }
+		page_record = { name = page.name, known = {}, seen = {}, landmarks = nil, first = {} }
 		self.pages[page.id] = page_record
 	end
 
 	if rebuilt(page_record, blocks, matched) then
 		page_record.known = {}
 		page_record.seen = {}
+		page_record.first = {}
 	end
 
 	local known = page_record.known
@@ -339,11 +349,138 @@ function CniSessionMap:observe(page, blocks, matched, states)
 		end
 	end
 
+	-- what the crew said a toggle starts in comes before what it is taken to start in
+	self:apply_defaults(page, page_record, drawn)
+
 	for name, toggle in pairs(self.starting) do
 		if toggle.page == page.name then
 			self:assume(name, toggle, known, drawn)
 		end
 	end
+end
+
+--- The elements drawing a toggle's positions, nil while none of them is on screen
+--- @param toggle CniToggle
+--- @param drawn { [string]: string }
+--- @return string?
+local function signature(toggle, drawn)
+	local parts = {}
+	for _, member in ipairs(toggle.members) do
+		if drawn[member] then
+			parts[#parts + 1] = member .. "=" .. drawn[member]
+		end
+	end
+	if #parts == 0 then
+		return nil
+	end
+	return table.concat(parts, ";")
+end
+
+--- Whether nothing is known about any position of the toggle on screen
+--- @param known { [string]: { [string]: boolean } }
+--- @param toggle CniToggle
+--- @param drawn { [string]: string }
+--- @return boolean
+local function unsettled(known, toggle, drawn)
+	for _, member in ipairs(toggle.members) do
+		local identity = drawn[member]
+		if identity and is_lit(known, member, identity) ~= nil then
+			return false
+		end
+	end
+	return true
+end
+
+--- Notes the elements each toggle is first seen with, and takes a toggle nothing is known about
+--- to be in the position the crew said it starts in
+--- @private
+--- @param page CniPage
+--- @param page_record CniSessionPage
+--- @param drawn { [string]: string }
+function CniSessionMap:apply_defaults(page, page_record, drawn)
+	local page_defaults = self.defaults[page.name]
+	for _, toggle in ipairs(page.toggles or {}) do
+		local seen = signature(toggle, drawn)
+		if seen and not page_record.first[toggle.key] then
+			page_record.first[toggle.key] = seen
+		end
+
+		local fields = page_defaults and page_defaults[toggle.key]
+		if fields and seen and unsettled(page_record.known, toggle, drawn) then
+			for member, lit in pairs(fields) do
+				local identity = drawn[member]
+				if identity then
+					mark(page_record.known, member, identity, lit == true)
+				end
+			end
+		end
+	end
+end
+
+--- The toggle beside a line select key on the page last observed: of several, the one on screen
+--- nearest the key
+--- @param page CniPage
+--- @param row integer 1-6
+--- @param side string L or R
+--- @return CniToggle?
+function CniSessionMap:toggle_at(page, row, side)
+	local best = nil
+	for _, toggle in ipairs(page.toggles or {}) do
+		if toggle.row == row and toggle.side == side and signature(toggle, self.current) then
+			if not best or toggle.edge < best.edge then
+				best = toggle
+			end
+		end
+	end
+	return best
+end
+
+--- Moves a toggle on the page last observed on to its next position, or a lone field to its other
+--- form, because the crew says that is where the aircraft has it. Nothing reaches the aircraft.
+--- @param page CniPage
+--- @param toggle CniToggle
+--- @return { [string]: boolean }? fields whether each position on screen is now the lit one
+--- @return boolean unchanged whether the toggle is still as it was first seen, so this is also the position it starts in
+function CniSessionMap:shift(page, toggle)
+	local page_record = self.pages[page.id]
+	if not page_record or page_record ~= self.current_page then
+		return nil, false
+	end
+	local known, drawn = page_record.known, self.current
+
+	local members = {}
+	for _, member in ipairs(toggle.members) do
+		if drawn[member] then
+			members[#members + 1] = member
+		end
+	end
+	if #members == 0 then
+		return nil, false
+	end
+
+	local fields = {}
+	if #members == 1 then
+		fields[members[1]] = is_lit(known, members[1], drawn[members[1]]) ~= true
+	else
+		local lit_index = nil
+		for i, member in ipairs(members) do
+			if is_lit(known, member, drawn[member]) == true then
+				lit_index = i
+				break
+			end
+		end
+		local next_index = lit_index and (lit_index % #members) + 1 or 1
+		for i, member in ipairs(members) do
+			fields[member] = i == next_index
+		end
+	end
+
+	for member, lit in pairs(fields) do
+		mark(known, member, drawn[member], lit)
+	end
+
+	local first = page_record.first[toggle.key]
+	return fields, first ~= nil and first == signature(toggle, drawn)
 end
 
 --- Takes a toggle nothing is known about to be in its starting position

@@ -12,6 +12,7 @@ local ControlAttributeDocumentation = require("Scripts.DCS-BIOS.lib.modules.docu
 local ControlType = require("Scripts.DCS-BIOS.lib.modules.documentation.ControlType")
 local FixedStepInput = require("Scripts.DCS-BIOS.lib.modules.documentation.FixedStepInput")
 local Functions = require("Scripts.DCS-BIOS.lib.common.Functions")
+local HighlightDefaults = require("Scripts.DCS-BIOS.lib.modules.displays.HighlightDefaults")
 local IndicatorDump = require("Scripts.DCS-BIOS.lib.modules.displays.IndicatorDump")
 local IntegerOutput = require("Scripts.DCS-BIOS.lib.modules.documentation.IntegerOutput")
 local Module = require("Scripts.DCS-BIOS.lib.modules.Module")
@@ -2006,8 +2007,12 @@ local CNI_DISPLAY_SEATS = {
 	{ prefix = "AUG", category = AUG_CNI_MU, description = "Aug Crew CNI-MU" },
 }
 
+-- the positions the crew said the displays' toggles start in, kept next to BIOSConfig.lua
+local highlight_defaults = HighlightDefaults:new({ file = lfs.writedir() .. [[Scripts/DCS-BIOS/C-130J-Highlights.lua]] })
+
 local cni_display = CniDisplay:new({
 	debug_file = BIOSConfig.c130j_cni_debug and (lfs.writedir() .. [[Logs/DCS-BIOS-C-130J-CNI.log]]) or nil,
+	defaults = highlight_defaults,
 })
 
 C_130J:addExportHook(function(dev0)
@@ -2059,6 +2064,28 @@ local function define_cni_swap(identifier, seat, toggle, category, description)
 	end)
 end
 
+--- Adds an input moving the highlight of the toggle beside a line select key on to its next
+--- position, for a display that shows it wrong or not at all. Only the exported display changes,
+--- not the aircraft.
+--- @param identifier string
+--- @param seat integer
+--- @param category string
+--- @param description string
+local function define_cni_shift(identifier, seat, category, description)
+	local control = Control:new(category, ControlType.action, identifier, description, {
+		SetStateInput:new(12, "the line select key beside the toggle: 1-6 for L1-L6, 7-12 for R1-R6"),
+	}, {}, nil, ControlAttributeDocumentation.from_base_attributes(nil))
+
+	C_130J:addControl(control)
+
+	C_130J:addInputProcessor(identifier, function(value)
+		local key = tonumber(value)
+		if key then
+			cni_display:shift_highlight(seat, key)
+		end
+	end)
+end
+
 for seat, info in ipairs(CNI_DISPLAY_SEATS) do
 	for line = 1, CniDisplay.LINES do
 		C_130J:defineString(info.prefix .. "_CNI_LINE" .. line, function()
@@ -2081,6 +2108,7 @@ for seat, info in ipairs(CNI_DISPLAY_SEATS) do
 	end, 1, info.category, info.description .. " EXEC Light (derived from the display and the EXEC keys)")
 
 	define_cni_swap(info.prefix .. "_CNI_WPT_SEQ_SWAP", seat, "WPT_SEQ", info.category, info.description .. " Display: Swap the WPT SEQ highlight (AUTO/MAN) if the aircraft did not start on AUTO")
+	define_cni_shift(info.prefix .. "_CNI_SHIFT_HIGHLIGHT", seat, info.category, info.description .. " Display: Move the highlight of the toggle beside a line select key on by one position, without pressing it")
 end
 
 -- AMU Displays
