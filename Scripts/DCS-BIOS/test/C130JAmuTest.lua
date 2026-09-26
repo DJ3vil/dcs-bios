@@ -55,18 +55,23 @@ local EDIT_DONE = indication({ "", "EDIT PAGE", "<LEVEL 50%", "SET>", "MENU>" },
 local PLAIN = string.rep("0", AmuDisplay.COLUMNS)
 
 --- @param indications { [integer]: string }
+--- @param defaults HighlightDefaults?
 --- @return AmuDisplay
-local function new_display(indications)
+local function new_display(indications, defaults)
 	return AmuDisplay:new({
 		list_indication = function(id)
 			return indications[id] or ""
 		end,
+		defaults = defaults,
 	})
 end
 
-local function run(display, ticks)
+--- @param display AmuDisplay
+--- @param ticks integer?
+--- @param dev0 table? the cockpit device, for the keys
+local function run(display, ticks, dev0)
 	for _ = 1, ticks or 100 do
-		display:update()
+		display:update(dev0)
 	end
 end
 
@@ -200,9 +205,10 @@ function TestC130JAmu:testEntryBeingEditedIsHighlighted()
 		lu.assertEquals(display:get_line(1, 4), "                   SET>")
 		lu.assertEquals(display:get_format(1, 4), PLAIN)
 
-		-- the words of a toggle come without the box of the selected one
+		-- of the toggles, only PILOT/COPILOT is known before anything is pressed: the pilot's AMUs
+		-- start on PILOT
 		for line = 1, AmuDisplay.LINES do
-			lu.assertEquals(display:get_format(2, line), PLAIN)
+			lu.assertEquals(display:get_format(2, line), line == 3 and ("22222" .. string.rep("0", 18)) or PLAIN)
 		end
 
 		indications[18] = EDIT_DONE
@@ -238,4 +244,167 @@ function TestC130JAmu:testMissingModuleLeavesTheUnitsDark()
 
 	lu.assertEquals(display.schema_state, "failed")
 	lu.assertEquals(display:get_line(1, 1), BLANK)
+end
+
+-- the cockpit argument of L1 of each unit; L2-L4 and R1-R4 follow on
+local FIRST_KEY_ARG = { 133, 141, 174, 182 }
+
+--- A cockpit device whose keys can be pressed
+local function cockpit()
+	local args = {}
+	return {
+		args = args,
+		get_argument_value = function(_, arg)
+			return args[arg] or 0
+		end,
+	}
+end
+
+--- Presses and lets go of a key of a unit: 1-4 for L1-L4, 5-8 for R1-R4
+local function press(display, dev0, unit, key)
+	local arg = FIRST_KEY_ARG[unit] + key - 1
+	dev0.args[arg] = 1
+	run(display, 1, dev0)
+	dev0.args[arg] = 0
+	run(display, 8, dev0)
+end
+
+--- The words of a line of a unit drawn boxed
+local function boxed(display, unit, line)
+	local text, format = display:get_line(unit, line), display:get_format(unit, line)
+	local words = {}
+	for start, word, stop in text:gmatch("()([%w]+)()") do
+		if format:sub(start, stop - 1):match("^2+$") then
+			words[#words + 1] = word
+		end
+	end
+	return table.concat(words, ",")
+end
+
+function TestC130JAmu:testExtractorFindsTheToggles()
+	with_test_install(function()
+		local script_path, common_path = CniSchemaExtractor.find_script_root()
+		local catalogue = AmuSchemaExtractor.catalogue(script_path, common_path)
+		local toggles = AmuDisplay.toggles_of(AmuSchemaExtractor.extract_page(script_path, common_path, catalogue[2]))
+
+		local found = {}
+		for key, toggle in pairs(toggles.toggles) do
+			local texts = {}
+			for word = 1, toggle.count do
+				texts[word] = toggle.texts[word]
+			end
+			found[key] = table.concat(texts, "/")
+		end
+		-- a word on its own, like BARO or REF UNIT, is no toggle; 2/1 reads 1/2 from the right key
+		lu.assertEquals(found, { [1] = "PILOT/COPILOT", [2] = "IN/MB", [3] = "MAG/TRUE/GRID", [5] = "2/1" })
+		lu.assertEquals(toggles.side, 1)
+	end)
+end
+
+function TestC130JAmu:testPressesMoveTheBox()
+	with_test_install(function()
+		local dev0 = cockpit()
+		local display = new_display({ [18] = DISPLAY })
+		run(display, 100, dev0)
+
+		-- the pilot's AMUs start on PILOT; nothing is known of the other toggles
+		lu.assertEquals(boxed(display, 1, 3), "PILOT")
+		lu.assertEquals(boxed(display, 1, 7), "")
+
+		press(display, dev0, 1, 1)
+		lu.assertEquals(boxed(display, 1, 3), "COPILOT")
+		press(display, dev0, 1, 1)
+		lu.assertEquals(boxed(display, 1, 3), "PILOT")
+
+		-- the crew says where MAG/TRUE/GRID is, and every press is followed from there
+		display:shift_highlight(1, 3)
+		run(display, 8, dev0)
+		lu.assertEquals(boxed(display, 1, 7), "MAG")
+		press(display, dev0, 1, 3)
+		lu.assertEquals(boxed(display, 1, 7), "TRUE")
+		press(display, dev0, 1, 3)
+		press(display, dev0, 1, 3)
+		lu.assertEquals(boxed(display, 1, 7), "MAG")
+
+		-- a key held down is one press, and a key with no toggle beside it changes nothing
+		dev0.args[FIRST_KEY_ARG[1] + 2] = 1
+		run(display, 5, dev0)
+		dev0.args[FIRST_KEY_ARG[1] + 2] = 0
+		run(display, 8, dev0)
+		lu.assertEquals(boxed(display, 1, 7), "TRUE")
+		press(display, dev0, 1, 8)
+		display:shift_highlight(1, 8)
+		run(display, 8, dev0)
+		lu.assertEquals(boxed(display, 1, 7), "TRUE")
+		lu.assertEquals(boxed(display, 1, 3), "PILOT")
+	end)
+end
+
+function TestC130JAmu:testTogglesAreFollowedPerSide()
+	with_test_install(function()
+		local dev0 = cockpit()
+		local display = new_display({ [18] = DISPLAY, [20] = DISPLAY })
+		run(display, 100, dev0)
+
+		-- the copilot's AMUs start on COPILOT
+		lu.assertEquals(boxed(display, 3, 3), "COPILOT")
+
+		-- BARO is IN for the pilot's side
+		display:shift_highlight(1, 2)
+		run(display, 8, dev0)
+		lu.assertEquals(boxed(display, 1, 5), "IN")
+
+		-- and not known for the copilot's, until the crew says so
+		press(display, dev0, 1, 1)
+		lu.assertEquals(boxed(display, 1, 3), "COPILOT")
+		lu.assertEquals(boxed(display, 1, 5), "")
+		display:shift_highlight(1, 2)
+		display:shift_highlight(1, 2)
+		run(display, 8, dev0)
+		lu.assertEquals(boxed(display, 1, 5), "MB")
+
+		-- each side keeps its own
+		press(display, dev0, 1, 1)
+		lu.assertEquals(boxed(display, 1, 5), "IN")
+	end)
+end
+
+function TestC130JAmu:testCorrectionIsKeptAsWhereTheToggleStarts()
+	with_test_install(function()
+		local HighlightDefaults = require("Scripts.DCS-BIOS.lib.modules.displays.HighlightDefaults")
+		local defaults = HighlightDefaults:new()
+		local dev0 = cockpit()
+		local display = new_display({ [20] = DISPLAY }, defaults)
+		run(display, 100, dev0)
+
+		-- MAG/TRUE/GRID pressed twice before the crew says it is on MAG now: it started on TRUE
+		press(display, dev0, 3, 3)
+		press(display, dev0, 3, 3)
+		display:shift_highlight(3, 3)
+		run(display, 8, dev0)
+		lu.assertEquals(boxed(display, 3, 7), "MAG")
+		lu.assertEquals(defaults:section("amu_ri").DISPLAY, { ["3|COPILOT"] = 2 })
+
+		-- the next session starts it there
+		local next_session = new_display({ [20] = DISPLAY }, defaults)
+		run(next_session, 100, dev0)
+		lu.assertEquals(boxed(next_session, 3, 7), "TRUE")
+		press(next_session, dev0, 3, 3)
+		lu.assertEquals(boxed(next_session, 3, 7), "GRID")
+
+		-- the other units keep defaults of their own
+		local other = new_display({ [21] = DISPLAY }, defaults)
+		run(other, 100, dev0)
+		lu.assertEquals(boxed(other, 4, 7), "")
+	end)
+end
+
+function TestC130JAmu:testModuleOffersTheCorrectionForEveryUnit()
+	local C_130J = require("Scripts.DCS-BIOS.lib.modules.aircraft_modules.C-130J")
+	for _, prefix in ipairs({ "LO", "LI", "RI", "RO" }) do
+		local shift = C_130J.inputProcessors[prefix .. "_AMU_SHIFT_HIGHLIGHT"]
+		lu.assertNotNil(shift, prefix)
+		shift("3")
+		shift("not a key")
+	end
 end

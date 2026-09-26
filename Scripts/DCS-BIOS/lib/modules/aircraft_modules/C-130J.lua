@@ -2121,10 +2121,10 @@ local AMU_DISPLAYS = {
 	{ prefix = "RO_AMU", category = RO_AMU, description = "Right Outer AMU" },
 }
 
-local amu_display = AmuDisplay:new()
+local amu_display = AmuDisplay:new({ defaults = highlight_defaults })
 
-C_130J:addExportHook(function()
-	amu_display:update()
+C_130J:addExportHook(function(dev0)
+	amu_display:update(dev0)
 end)
 
 for unit, info in ipairs(AMU_DISPLAYS) do
@@ -2142,6 +2142,17 @@ for unit, info in ipairs(AMU_DISPLAYS) do
 			return amu_display:get_format(unit, line)
 		end, AmuDisplay.COLUMNS, info.category, info.description .. " Display Line " .. line .. " Format (0=plain, 2=highlighted)")
 	end
+
+	local identifier = info.prefix .. "_SHIFT_HIGHLIGHT"
+	C_130J:addControl(Control:new(info.category, ControlType.action, identifier, info.description .. " Display: Move the box of the toggle beside a key on by one word, without pressing it", {
+		SetStateInput:new(8, "the key beside the toggle: 1-4 for L1-L4, 5-8 for R1-R4"),
+	}, {}, nil, ControlAttributeDocumentation.from_base_attributes(nil)))
+	C_130J:addInputProcessor(identifier, function(value)
+		local key = tonumber(value)
+		if key then
+			amu_display:shift_highlight(unit, key)
+		end
+	end)
 end
 
 return C_130J

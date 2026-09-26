@@ -88,7 +88,8 @@ end
 --- @param slot CniSlot
 --- @param text string
 --- @param width integer
-local function place(row, slot, text, width)
+--- @param invert boolean whether the text is drawn highlighted
+local function place(row, slot, text, width, invert)
 	local origin = slot.col
 	local length = #text
 
@@ -104,7 +105,7 @@ local function place(row, slot, text, width)
 			if not (ch == SPACE and row.chars[col] ~= SPACE) then
 				row.chars[col] = ch
 				row.small[col] = slot.small
-				row.invert[col] = slot.invert
+				row.invert[col] = invert
 				row.origins[col] = origin
 			end
 		end
@@ -116,9 +117,10 @@ end
 --- @param matched (CniSlot|nil)[] the slot of each block
 --- @param columns integer? the width of the grid, 25 for the CNI-MU
 --- @param line_count integer? the height of the grid, 14 for the CNI-MU
+--- @param highlighted { [integer]: boolean }? blocks to draw highlighted whatever their slot says
 --- @return string[] lines one string per line
 --- @return string[] formats per character 0 large, 1 small, 2 large inverted, 3 small inverted
-function CniGrid.render(blocks, matched, columns, line_count)
+function CniGrid.render(blocks, matched, columns, line_count, highlighted)
 	columns = columns or CniGrid.COLUMNS
 	line_count = line_count or CniGrid.LINES
 
@@ -139,7 +141,7 @@ function CniGrid.render(blocks, matched, columns, line_count)
 		if slot and CniSchema.is_placeable(slot) and slot.line < line_count then
 			local text = CniGrid.map_glyphs(blocks[i].v)
 			if text ~= "" then
-				place(rows[slot.line], slot, text, columns)
+				place(rows[slot.line], slot, text, columns, slot.invert or (highlighted ~= nil and highlighted[i] == true))
 			end
 		end
 	end

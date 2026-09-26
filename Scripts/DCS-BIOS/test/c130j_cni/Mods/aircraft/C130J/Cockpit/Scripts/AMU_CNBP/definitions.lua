@@ -48,11 +48,23 @@ local along = 0
 
 function make_single_entry(k, y, alignment, label, is_format)
 	local direction = k > 4 and -1 or 1
-	for _, word in ipairs(words(label)) do
+	local list = words(label)
+	local word_index = 0
+	for _, word in ipairs(list) do
+		local el
 		if is_format then
-			add_text(nil, word, along, y, alignment)
+			el = add_text(nil, word, along, y, alignment)
 		else
-			add_text(word, nil, along, y, alignment)
+			el = add_text(word, nil, along, y, alignment)
+		end
+		-- the words of a toggle, each with the box drawn behind it while it is the selected one
+		if #list > 1 then
+			if word == "/" then
+				el.controllers = { { "amu_box_9" } }
+			else
+				el.controllers = { { "amu_box_" .. (k - 1) .. "_" .. word_index } }
+				word_index = word_index + 1
+			end
 		end
 		along = along + direction * strdefcenter[2] * (#word + word_gap) * word_scale
 	end

@@ -15,6 +15,13 @@ module("AmuSchemaExtractor", package.seeall)
 local CniFormat = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniFormat")
 local CniSchemaExtractor = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniSchemaExtractor")
 
+--- @class AmuBox a word of a toggle, the words of which the module boxes one at a time
+--- @field key integer the key beside the toggle: 1-4 for L1-L4, 5-8 for R1-R4
+--- @field word integer which of its words, in the order the page script lists them
+
+--- @class AmuRawSlot: CniRawSlot
+--- @field box AmuBox?
+
 --- @class AmuSchemaExtractor
 local AmuSchemaExtractor = {}
 
@@ -127,10 +134,30 @@ local function column_of(env, el, x, anchor)
 	return math.max(0, round((x + e) / adv))
 end
 
+--- Which key's toggle a word belongs to, and which of its words it is: the module draws the box
+--- behind the selected word with a controller named amu_box_<key>_<word>, both counted from 0
+--- @param el table
+--- @return AmuBox?
+local function box_of(el)
+	if type(el.controllers) ~= "table" then
+		return nil
+	end
+	for _, controller in ipairs(el.controllers) do
+		local name = type(controller) == "table" and controller[1] or nil
+		if type(name) == "string" then
+			local key, word = name:match("^amu_box_(%d+)_(%d+)$")
+			if key then
+				return { key = tonumber(key) + 1, word = tonumber(word) + 1 }
+			end
+		end
+	end
+	return nil
+end
+
 --- @param env table
 --- @param el table
 --- @param ordinal integer
---- @return CniRawSlot
+--- @return AmuRawSlot
 local function describe(env, el, ordinal)
 	local pos = type(el.init_pos) == "table" and el.init_pos or {}
 	local anchor = anchor_of(el.alignment)
@@ -163,6 +190,7 @@ local function describe(env, el, ordinal)
 		col = column_of(env, el, pos[1], anchor),
 		-- drawn on a box, like an entry being edited
 		invert = el.UseBackGround == true or nil,
+		box = box_of(el),
 	}
 end
 
