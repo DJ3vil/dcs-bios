@@ -5,6 +5,7 @@ local CniIndication = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.
 local CniSchema = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniSchema")
 local CniSessionMap = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniSessionMap")
 local CniVariants = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniVariants")
+local TempPath = require("Scripts.DCS-BIOS.test.io.TempPath")
 local lu = require("Scripts.DCS-BIOS.test.ext.luaunit")
 
 --- @class TestC130JCniSession
@@ -711,7 +712,7 @@ end
 
 function TestC130JCniSession:testDefaultsAreKeptInAFile()
 	local HighlightDefaults = require("Scripts.DCS-BIOS.lib.modules.displays.HighlightDefaults")
-	local path = os.tmpname()
+	local path = TempPath.new()
 
 	local defaults = HighlightDefaults:new({ file = path })
 	defaults:remember("cni", "ROUTE_GEN", "5R:route", { route_cp = false, route_nom = true, route_pp = false })

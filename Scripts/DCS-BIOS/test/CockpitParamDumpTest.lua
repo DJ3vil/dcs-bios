@@ -1,4 +1,5 @@
 local CockpitParamDump = require("Scripts.DCS-BIOS.lib.modules.displays.CockpitParamDump")
+local TempPath = require("Scripts.DCS-BIOS.test.io.TempPath")
 local lu = require("Scripts.DCS-BIOS.test.ext.luaunit")
 
 --- @class TestCockpitParamDump
@@ -34,7 +35,7 @@ local function listing(params)
 end
 
 function TestCockpitParamDump:setUp()
-	self.path = os.tmpname()
+	self.path = TempPath.new()
 	os.remove(self.path)
 	self.params = { AMU_PAGE = "1.000000", ["EXT:FUEL"] = "0.500000" }
 	self.args = {}

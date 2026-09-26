@@ -1,4 +1,5 @@
 local IndicatorDump = require("Scripts.DCS-BIOS.lib.modules.displays.IndicatorDump")
+local TempPath = require("Scripts.DCS-BIOS.test.io.TempPath")
 local lu = require("Scripts.DCS-BIOS.test.ext.luaunit")
 
 --- @class TestIndicatorDump
@@ -23,7 +24,7 @@ local function count(text, pattern)
 end
 
 function TestIndicatorDump:setUp()
-	self.path = os.tmpname()
+	self.path = TempPath.new()
 	os.remove(self.path)
 	self.indications = {}
 	self.now = 100
