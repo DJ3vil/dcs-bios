@@ -330,8 +330,8 @@ function TestC130JCniSession:testTwoDecisionsSharingAStemStayApart()
 		{ key = "route@10", members = { "route_cp", "route_nom", "route_pp" } },
 	})
 
-	-- without the starting state WPT SEQ is taken to be in
-	local map = CniSessionMap:new({})
+	-- without the starting state WPT SEQ is taken to be in, nor where a crew found WP TRANS
+	local map = CniSessionMap:new({}, nil, {})
 	local frames = {
 		{ "AUTO", "P-P" },
 		{ "MAN", "P-P" },
@@ -409,7 +409,8 @@ end
 
 function TestC130JCniSession:testRebuiltPageStartsOverFromTheStartingPosition()
 	local page = CniSchema.prepare_page(ROUTE)
-	local map = CniSessionMap:new()
+	-- WPT SEQ's starting state alone, not where a crew found WP TRANS
+	local map = CniSessionMap:new(nil, nil, {})
 	lu.assertEquals(wpt_seq(map, page, "AUTO"), "AUTO")
 	lu.assertEquals(wpt_seq(map, page, "MAN"), "MAN")
 
@@ -667,8 +668,66 @@ function TestC130JCniSession:testEachRowOfAFieldBuiltPerRowIsAToggleOfItsOwn()
 	lu.assertEquals(lit_words(map, page, raw), { "UGKS" })
 end
 
+-- and of the mission index, whose ROUTE 1/ROUTE 2 a crew found on ROUTE 1 on a new aircraft
+local MSN_IDX = {
+	id = 7,
+	name = "MSN_IDX",
+	slots = {
+		slot(1, { name = "cni_title", value = "MISSIONS", anchor = "Center", line = 0, col = 13 }),
+		slot(2, { ctrl = "msn_sel_rt1_on", value = "ROUTE 1", line = 2, col = 0, invert = true }),
+		slot(3, { ctrl = "msn_sel_rt1_off", value = "ROUTE 1", line = 2, col = 0, small = true }),
+		slot(4, { ctrl = "msn_sel_rt1_on", value = "/", line = 2, col = 7 }),
+		slot(5, { ctrl = "msn_sel_rt1_off", value = "/", line = 2, col = 7 }),
+		slot(6, { ctrl = "msn_sel_rt2_on", value = "ROUTE 2", line = 2, col = 8, invert = true }),
+		slot(7, { ctrl = "msn_sel_rt2_off", value = "ROUTE 2", line = 2, col = 8, small = true }),
+		slot(8, { value = "<SAR PROG", line = 6, col = 0 }),
+		slot(9, { name = "cni_scratchpad", ctrl = "scratch", fmt = { "%s" }, line = 13, col = 0 }),
+	},
+}
+
+local MISSIONS = indication({
+	{ "cni_title", "MISSIONS" },
+	{ "{RT1}", "ROUTE 1" },
+	{ "{RT1-SLASH}", "/" },
+	{ "{RT2}", "ROUTE 2" },
+	{ "{SAR-PROG}", "<SAR PROG" },
+	{ "cni_scratchpad", "" },
+})
+
+--- The runs of text drawn lit on the page
+--- @param map CniSessionMap
+--- @param page CniPage
+--- @param raw string
+--- @return string[]
+local function lit_runs(map, page, raw)
+	local flat = CniIndication.flatten((CniIndication.parse(raw)))
+	local matched = CniBlockMatcher.align(flat, page.slots)
+	CniVariants.apply(matched, page, flat, nil, nil, map)
+	local lines, formats = CniGrid.render(flat, matched)
+
+	local runs = {}
+	for line = 1, CniGrid.LINES do
+		for start, stop in formats[line]:gmatch("()[23]+()") do
+			runs[#runs + 1] = lines[line]:sub(start, stop - 1)
+		end
+	end
+	return runs
+end
+
+function TestC130JCniSession:testTogglesStartWhereACrewFoundThemOnANewAircraft()
+	local page = CniSchema.prepare_page(MSN_IDX)
+	lu.assertEquals(lit_runs(CniSessionMap:new({}), page, MISSIONS), { "ROUTE 1" })
+
+	-- the crew's own word comes first
+	local said = { MSN_IDX = { ["1L:msn_sel"] = { msn_sel_rt1 = false, msn_sel_rt2 = true } } }
+	lu.assertEquals(lit_runs(CniSessionMap:new({}, said), page, MISSIONS), { "ROUTE 2" })
+
+	-- and without any, nothing is known
+	lu.assertEquals(lit_runs(CniSessionMap:new({}, nil, {}), page, MISSIONS), {})
+end
+
 --- A CNI-MU display reading the given pages, with the indications and defaults given
-local function new_display(pages, indications, defaults)
+local function new_display(pages, indications, defaults, start_positions)
 	return CniDisplay:new({
 		list_indication = function(id)
 			return indications[id] or ""
@@ -680,6 +739,7 @@ local function new_display(pages, indications, defaults)
 			return pages
 		end,
 		defaults = defaults,
+		start_positions = start_positions,
 	})
 end
 
@@ -706,7 +766,8 @@ function TestC130JCniSession:testCorrectionIsKeptAsWhereTheToggleStarts()
 	local defaults = HighlightDefaults:new()
 	local indications = { [8] = route("AUTO", "ROT") }
 
-	local display = new_display({ ROUTE }, indications, defaults)
+	-- nothing known of WP TRANS, not even where a crew found it on a new aircraft
+	local display = new_display({ ROUTE }, indications, defaults, {})
 	run(display, 30)
 	lu.assertEquals(display:get_line(1, 11), "<DEP/ARR       CP/ROT/P-P")
 	lu.assertEquals(wp_trans(display), "")

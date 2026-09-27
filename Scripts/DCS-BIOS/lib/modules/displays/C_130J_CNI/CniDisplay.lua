@@ -29,6 +29,7 @@ local Log = require("Scripts.DCS-BIOS.lib.common.Log")
 --- @field load_pages (fun(): CniRawPage[])? source of the page layouts, instead of the module's scripts
 --- @field debug_file string? file to write every rendered page to, for troubleshooting
 --- @field defaults HighlightDefaults? where the positions the crew said toggles start in are kept
+--- @field start_positions { [string]: { [string]: { [string]: boolean } } }? where a crew found the toggles on a new aircraft, CniStartPositions if not given
 
 --- @class CniDisplay
 local CniDisplay = {}
@@ -75,6 +76,7 @@ function CniDisplay:new(options)
 		debug_file = options.debug_file,
 		debug_entries = 0,
 		defaults = options.defaults,
+		start_positions = options.start_positions,
 
 		lines = {},
 		formats = {},
@@ -119,7 +121,7 @@ function CniDisplay:new(options)
 		o.lamps[seat] = CniExecLamp:new()
 		o.seats[seat] = { raw = nil, title = nil, dirty = false }
 		-- every CNI-MU draws with elements of its own
-		o.sessions[seat] = CniSessionMap:new(nil, o.defaults and o.defaults:section("cni"))
+		o.sessions[seat] = CniSessionMap:new(nil, o.defaults and o.defaults:section("cni"), o.start_positions)
 		for line = 1, CniGrid.LINES do
 			o.lines[seat][line] = BLANK_LINE
 			o.formats[seat][line] = BLANK_FORMAT

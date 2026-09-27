@@ -27,8 +27,12 @@ module("CniSessionMap", package.seeall)
 -- The crew can also say which position a toggle is in (shift()), without touching the aircraft.
 -- That, too, is written down against the elements on screen, so every later switch is followed
 -- from there; and said of a toggle still in the position it was first seen in, it is what the
--- toggle starts in, which the caller can keep as a default for later sessions (defaults).
+-- toggle starts in, which the caller can keep as a default for later sessions (defaults). Where
+-- the crew has said nothing, a toggle starts where a crew found it on a new aircraft
+-- (CniStartPositions).
 -- Lua port of CniSessionMap.cs of WCtrlDcsBiosBridge, see LICENSE-WCtrlDcsBiosBridge.txt.
+
+local CniStartPositions = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniStartPositions")
 
 --- @class CniSessionPage what is known about the elements of one page
 --- @field name string the page name
@@ -48,6 +52,7 @@ module("CniSessionMap", package.seeall)
 --- @field private starting { [string]: CniStartingState }
 --- @field private swap_pending { [string]: boolean } toggles to take the other way round when first seen
 --- @field private defaults { [string]: { [string]: { [string]: boolean } } } per page and toggle, the position it starts in
+--- @field private start_positions { [string]: { [string]: { [string]: boolean } } } per page and toggle, where it is on a new aircraft
 local CniSessionMap = {}
 
 --- @type { [string]: CniStartingState }
@@ -58,8 +63,9 @@ CniSessionMap.STARTING_STATES = {
 
 --- @param starting_states { [string]: CniStartingState }? defaults to STARTING_STATES
 --- @param defaults { [string]: { [string]: { [string]: boolean } } }? per page name and toggle key, whether each field is lit in the position the toggle starts in; read whenever a toggle is first seen, so it can grow while the session runs
+--- @param start_positions { [string]: { [string]: { [string]: boolean } } }? the same for a toggle the crew has said nothing of; defaults to CniStartPositions
 --- @return CniSessionMap
-function CniSessionMap:new(starting_states, defaults)
+function CniSessionMap:new(starting_states, defaults, start_positions)
 	local o = {
 		pages = {},
 		current = {},
@@ -67,6 +73,7 @@ function CniSessionMap:new(starting_states, defaults)
 		starting = starting_states or CniSessionMap.STARTING_STATES,
 		swap_pending = {},
 		defaults = defaults or {},
+		start_positions = start_positions or CniStartPositions,
 	}
 	setmetatable(o, self)
 	self.__index = self
@@ -392,20 +399,22 @@ local function unsettled(known, toggle, drawn)
 end
 
 --- Notes the elements each toggle is first seen with, and takes a toggle nothing is known about
---- to be in the position the crew said it starts in
+--- to be in the position the crew said it starts in, or else where a crew found it on a new
+--- aircraft
 --- @private
 --- @param page CniPage
 --- @param page_record CniSessionPage
 --- @param drawn { [string]: string }
 function CniSessionMap:apply_defaults(page, page_record, drawn)
 	local page_defaults = self.defaults[page.name]
+	local page_starts = self.start_positions[page.name]
 	for _, toggle in ipairs(page.toggles or {}) do
 		local seen = signature(toggle, drawn)
 		if seen and not page_record.first[toggle.key] then
 			page_record.first[toggle.key] = seen
 		end
 
-		local fields = page_defaults and page_defaults[toggle.key]
+		local fields = (page_defaults and page_defaults[toggle.key]) or (page_starts and page_starts[toggle.key])
 		if fields and seen and unsettled(page_record.known, toggle, drawn) then
 			for member, lit in pairs(fields) do
 				local identity = drawn[member]
