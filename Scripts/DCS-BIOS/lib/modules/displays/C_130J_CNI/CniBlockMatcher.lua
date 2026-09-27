@@ -18,6 +18,7 @@ local SCORE_UNINFORMATIVE = -2 -- a slot accepting any text: filled only when no
 local SCORE_FORMAT_MISS = -2
 local SCORE_UNSET_MISMATCH = -3 -- an empty field on a slot whose format carries punctuation
 local SCORE_BANNER = 14 -- the route discontinuity banner on its own slot
+local SCORE_UNSET_NAME = 4 -- a waypoint not yet entered, whose name the module writes as dashes
 local GAP_SLOT = -1 -- skipping a slot: a variant the sim did not draw
 local GAP_BLOCK = -8 -- leaving a block unplaced
 local GAP_EMPTY_BLOCK = -4 -- leaving a blank unplaced costs the screen nothing
@@ -143,6 +144,13 @@ local function pair_score(block, slot)
 	local marker = ends_with(slot.source, "_disc")
 	if banner or marker then
 		return (banner and marker) and SCORE_BANNER or FORBIDDEN
+	end
+
+	-- the leg after the last waypoint, or one broken off the route, draws its name as dashes
+	-- among blanks; the other fields of a leg that take any text would tie with the name, and
+	-- the earlier of them, the distance or the ETA, would take the dashes to the right margin
+	if is_unset(value) and is_leg_name(slot) then
+		return SCORE_UNSET_NAME
 	end
 
 	if slot.formats and not formats_accept(slot, value) then
