@@ -343,6 +343,15 @@ local function placeholder_suffix(value)
 	return rest
 end
 
+--- The format of a label the sim completes, like ECB's "HDD  ", which it draws as "HDD 3": the
+--- blanks it ends in, two or more, are the room for what the sim writes into them
+--- @param value string
+--- @return string?
+local function completed_label(value)
+	local head = value:match("^(.-%S) %s+$")
+	return head and (head .. " %s") or nil
+end
+
 local function anchor_of(alignment)
 	if type(alignment) ~= "string" then
 		return "Left"
@@ -413,9 +422,14 @@ local function describe(env, el, ordinal)
 		value = nil
 	elseif value and ctrl then
 		local suffix = placeholder_suffix(value)
+		local label = completed_label(value)
 		if suffix then
 			fmts = fmts or {}
 			fmts[#fmts + 1] = "%s" .. suffix
+			value = nil
+		elseif label then
+			fmts = fmts or {}
+			fmts[#fmts + 1] = label
 			value = nil
 		end
 	end

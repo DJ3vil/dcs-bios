@@ -12,6 +12,8 @@ add_cni_el("FREQ", 1, 1, SMALL_FONT_CNI, "LeftCenter")
 add_cni_el(nil, 2, 0, LARGE_FONT_CNI, "LeftCenter", "uhf1_freq", { "%d/%s" })
 add_cni_el("SQL", 3, 1, SMALL_FONT_CNI, "LeftCenter")
 add_cni_toggle("uhf1_sql", 4, 0, "ON", "OFF")
+-- a label the sim completes, like ECB's HDD, drawn as HDD 3
+add_cni_el("HDD  ", 6, 0, SMALL_FONT_CNI, "LeftCenter", "ecb_hdd_on_off")
 add_cni_el("<INDEX", 12, 0, LARGE_FONT_CNI, "LeftCenter")
 local scratchpad = add_cni_el(nil, 13, 0, LARGE_FONT_CNI, "LeftCenter", "cni_scratch", { "%s" })
 scratchpad.name = "cni_scratchpad"

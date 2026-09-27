@@ -172,6 +172,15 @@ function TestC130JCni:testExtractorReadsPageScripts()
 		lu.assertEquals(by_value["1/2"].anchor, "Right")
 		lu.assertEquals(by_value["FREQ"].line, 1)
 		lu.assertEquals(by_value["<INDEX"].line, 12)
+		-- the blanks a label ends in are room for what the sim writes into them
+		local hdd = nil
+		for _, slot in ipairs(page.slots) do
+			if slot.ctrl == "ecb_hdd_on_off" then
+				hdd = slot
+			end
+		end
+		lu.assertNil(hdd.value)
+		lu.assertEquals(hdd.fmt, { "HDD %s" })
 		-- the scratchpad asks for line 13, one past the module's table
 		lu.assertEquals(page.slots[#page.slots].name, "cni_scratchpad")
 		lu.assertEquals(page.slots[#page.slots].line, 13)
@@ -222,6 +231,17 @@ function TestC130JCni:testDisplayRendersPages()
 		dev0.args[1187] = 0
 		run(display, 10)
 		lu.assertFalse(display:get_exec_lamp(2))
+	end)
+end
+
+function TestC130JCni:testDisplayDrawsALabelTheSimCompletes()
+	with_test_install(function()
+		local display = new_display({
+			[8] = indication(element("cni_title", "TEST PAGE"), element("{COUNTER}", "1/2"), element("{FREQ-LABEL}", "FREQ"), element("{FREQ}", "1/243.000"), element("{SQL-LABEL}", "SQL"), element("{HDD}", "HDD 3"), element("{INDEX}", "<INDEX"), element("cni_scratchpad", "")),
+		})
+		run(display)
+
+		lu.assertEquals(display:get_line(1, 7), "HDD 3                    ")
 	end)
 end
 
