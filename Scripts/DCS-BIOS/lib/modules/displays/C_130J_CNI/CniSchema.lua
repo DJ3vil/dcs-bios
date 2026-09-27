@@ -13,6 +13,7 @@ local CniFormat = require("Scripts.DCS-BIOS.lib.modules.displays.C_130J_CNI.CniF
 --- @field value string?
 --- @field fmt string[]?
 --- @field ctrl string?
+--- @field ctrlIndex number? the index the controller carries, like the row of TOLD INDEX's TOLDs
 --- @field anchor string? Left, Center or Right
 --- @field line integer?
 --- @field lineErr number?
@@ -107,9 +108,11 @@ local function variant_of(ctrl)
 	return nil, false
 end
 
---- Each slot's controller, a toggle's words inheriting the one of their container
+--- Each slot's controller and the index it carries, a toggle's words inheriting those of their
+--- container
 --- @param slots CniRawSlot[]
 --- @return { [integer]: string }
+--- @return { [integer]: number }
 local function effective_controllers(slots)
 	local by_name = {}
 	for _, s in ipairs(slots) do
@@ -118,9 +121,9 @@ local function effective_controllers(slots)
 		end
 	end
 
-	local out = {}
+	local out, indices = {}, {}
 	for _, s in ipairs(slots) do
-		local ctrl = s.ctrl
+		local ctrl, index = s.ctrl, s.ctrlIndex
 		local parent = s.parent
 		local depth = 0
 		while not ctrl and parent and depth < 16 do
@@ -128,13 +131,14 @@ local function effective_controllers(slots)
 			if not up then
 				break
 			end
-			ctrl = up.ctrl
+			ctrl, index = up.ctrl, up.ctrlIndex
 			parent = up.parent
 			depth = depth + 1
 		end
 		out[s.n] = ctrl
+		indices[s.n] = index
 	end
-	return out
+	return out, indices
 end
 
 --- Add() order regrouped into the order the indication reports: a container's visible
@@ -539,9 +543,9 @@ function CniSchema.prepare_page(raw, columns)
 		end
 	end
 
-	local ctrl_of = effective_controllers(raw.slots)
+	local ctrl_of, index_of = effective_controllers(raw.slots)
 
-	local slots = {}
+	local slots, row_of = {}, {}
 	for _, s in ipairs(indication_order(raw.slots)) do
 		local ctrl = ctrl_of[s.n]
 		if ctrl == "" then
@@ -581,6 +585,24 @@ function CniSchema.prepare_page(raw, columns)
 		end
 
 		slots[#slots + 1] = slot
+		row_of[slot] = index_of[s.n]
+	end
+
+	-- a field the page builds once per row, like TOLD INDEX's column of TOLDs, tells its rows apart
+	-- by the index of the controller alone; each row is lit or not by itself, so each is a field
+	local rows = {}
+	for _, slot in ipairs(slots) do
+		local row = row_of[slot]
+		if slot.controller and row then
+			rows[slot.controller] = rows[slot.controller] or {}
+			rows[slot.controller][row] = true
+		end
+	end
+	for _, slot in ipairs(slots) do
+		local seen_rows = slot.controller and rows[slot.controller]
+		if seen_rows and next(seen_rows, next(seen_rows)) ~= nil then
+			slot.controller = slot.controller .. "_" .. tostring(row_of[slot])
+		end
 	end
 
 	resolve_variants(slots)

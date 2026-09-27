@@ -376,11 +376,13 @@ local function describe(env, el, ordinal)
 	local x, y = pos[1], unshift(env, el, pos[2])
 	local line, dist = nearest_line(env, y)
 
-	local ctrl
+	-- the index a controller may carry tells apart the rows of a field the page builds once per row
+	local ctrl, ctrl_index
 	if type(el.controllers) == "table" then
 		for _, c in ipairs(el.controllers) do
 			if type(c) == "table" and type(c[1]) == "string" then
 				ctrl = c[1]
+				ctrl_index = type(c[2]) == "number" and c[2] or nil
 				break
 			end
 		end
@@ -427,6 +429,7 @@ local function describe(env, el, ordinal)
 		value = value,
 		fmt = fmts,
 		ctrl = ctrl,
+		ctrlIndex = ctrl_index,
 		anchor = anchor_of(el.alignment),
 		line = line,
 		lineErr = (dist and dist > 0.0015) and dist or nil,

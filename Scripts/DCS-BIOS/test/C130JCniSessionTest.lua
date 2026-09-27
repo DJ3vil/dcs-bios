@@ -622,6 +622,51 @@ function TestC130JCniSession:testShiftTurnsALoneFieldOver()
 	lu.assertNil(lit_word(map, page, tacan("{REC-A}")))
 end
 
+-- and of TOLD INDEX, whose right column is one field built once per row: the rows are told apart
+-- only by the index their controller carries, and only the TOLD in use is drawn lit
+local TOLD_INDEX = {
+	id = 6,
+	name = "TOLD_IDX",
+	slots = {
+		slot(1, { name = "cni_title", value = "TOLD INDEX", anchor = "Center", line = 0, col = 13 }),
+		slot(2, { value = "<TOLD INIT", line = 2, col = 0 }),
+		slot(3, { value = "<T/O DATA", line = 4, col = 0 }),
+		slot(4, { ctrl = "told_init_to_field_on", ctrlIndex = 1, fmt = { "%s/%02d%s" }, line = 2, col = 25, anchor = "Right", invert = true }),
+		slot(5, { ctrl = "told_init_to_field_on", ctrlIndex = 2, fmt = { "%s/%02d%s" }, line = 4, col = 25, anchor = "Right", invert = true }),
+		slot(6, { ctrl = "told_init_to_field_off", ctrlIndex = 1, fmt = { "%s/%02d%s" }, line = 2, col = 25, anchor = "Right" }),
+		slot(7, { ctrl = "told_init_to_field_off", ctrlIndex = 2, fmt = { "%s/%02d%s" }, line = 4, col = 25, anchor = "Right" }),
+		slot(8, { name = "cni_scratchpad", ctrl = "scratch", fmt = { "%s" }, line = 13, col = 0 }),
+	},
+}
+
+--- TOLD INDEX with its two rows drawn by the given elements
+local function told_index(first, second)
+	return indication({
+		{ "cni_title", "TOLD INDEX" },
+		{ "{TOLD-INIT}", "<TOLD INIT" },
+		{ "{TO-DATA}", "<T/O DATA" },
+		{ first, "UGKS/09" },
+		{ second, "-----/---" },
+		{ "cni_scratchpad", "" },
+	})
+end
+
+function TestC130JCniSession:testEachRowOfAFieldBuiltPerRowIsAToggleOfItsOwn()
+	local page = CniSchema.prepare_page(TOLD_INDEX)
+	local keys = {}
+	for _, toggle in ipairs(page.toggles) do
+		keys[#keys + 1] = toggle.key .. " " .. table.concat(toggle.members, ",")
+	end
+	lu.assertEquals(keys, { "1R:told_init_to_field told_init_to_field_1", "2R:told_init_to_field told_init_to_field_2" })
+
+	-- the crew says the TOLD beside R1 is the one in use, and only that row is drawn lit
+	local map = CniSessionMap:new({})
+	local raw = told_index("{ROW1-A}", "{ROW2-A}")
+	lu.assertEquals(lit_words(map, page, raw), {})
+	map:shift(page, toggle_named(page, "1R:told_init_to_field"))
+	lu.assertEquals(lit_words(map, page, raw), { "UGKS" })
+end
+
 --- A CNI-MU display reading the given pages, with the indications and defaults given
 local function new_display(pages, indications, defaults)
 	return CniDisplay:new({
